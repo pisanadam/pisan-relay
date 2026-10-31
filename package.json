@@ -1,0 +1,13 @@
+{
+  "name": "pisan-relay",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Pisan Lig: tarayıcı oyuncularını gerçek bir Minecraft istemcisiyle (mineflayer) Pisan Lig sunucusuna bağlar.",
+  "main": "server.js",
+  "license": "MIT",
+  "dependencies": {
+    "mineflayer": "4.20.1",
+    "vec3": "0.1.10",
+    "ws": "8.18.0"
+  }
+}

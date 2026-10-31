@@ -1,7 +1,12 @@
 # Pisan Lig köprüsü
 
-Pisan SF League Minecraft sunucusundaki tarayıcı oyununu (telefon ve bilgisayar) internete açan küçük köprü.
-Minecraft eklentisi bu köprüye kendisi bağlanır; oyuncular `http://<adres>:<port>/` adresinden girer.
+Tarayıcıdan (telefon ve bilgisayar) **Pisan Lig** Minecraft sunucusuna gerçek oyuncu olarak girmeyi sağlar.
+Her tarayıcı oyuncusu için köprüde gerçek bir Minecraft 1.20.1 istemcisi ([mineflayer](https://github.com/PrismarineJS/mineflayer), MIT)
+çalışır ve yalnızca `pisan-sf-league.exaroton.me` sunucusuna bağlanır. Sunucu kapalıysa bu bağlantı exaroton'un
+"oyuncu girince başlat" özelliğini tetikler; sunucu açılınca oyuncu içeri girer.
+
+Tarayıcıda Minecraft benzeri küp dünya çizilir; blokları, oyuncuları, envanteri, menüleri ve sohbeti bu istemciden alır.
+Oyuncunun adı oyunda `(mobil)Ad` olur. Minecraft eklentisi bu oyuncuları anahtarla doğrular ve sıralamalara katmaz.
 
 ## Tek komutla çalıştır
 
@@ -9,29 +14,13 @@ Minecraft eklentisi bu köprüye kendisi bağlanır; oyuncular `http://<adres>:<
 curl -fsSL https://raw.githubusercontent.com/pisanadam/pisan-relay/main/start.sh | bash -s -- <ANAHTAR>
 ```
 
-- `<ANAHTAR>`: eklentinin `config.yml` dosyasındaki `web-relay-key` değeri.
-- Port verilmezse `server.properties` içindeki `server-port` kullanılır. Farklı port için: `… | bash -s -- <ANAHTAR> 25570`
-- Java yoksa taşınabilir Java 17 (Eclipse Temurin) `~/pisan-relay/jre` içine bir kere indirilir; sisteme bir şey kurulmaz.
-- Köprü arka planda çalışır, shell kapansa da durmaz. Kayıtlar: `~/pisan-relay/relay.log`
-- Durdurmak: `kill $(cat ~/pisan-relay/relay.pid)` • Güncellemek/yeniden başlatmak: aynı komutu tekrar çalıştır (anahtar kayıtlıysa anahtarsız da olur).
-- Kütüphane yok; tek dosya: `PisanRelay.java`.
+- `<ANAHTAR>`: eklentinin `config.yml` dosyasındaki `web-relay-key` değeri (bir kere verilince kaydedilir).
+- Node.js yoksa taşınabilir Node.js 20 `~/pisan-relay/node` içine bir kere indirilir; sisteme bir şey kurulmaz.
+- Arka planda çalışır; kayıtlar `~/pisan-relay/relay.log`. Durdurmak: `kill $(cat ~/pisan-relay/relay.pid)`.
+- Güncellemek için aynı komutu tekrar çalıştır.
 
-## Eklenti ayarı (Minecraft sunucusu)
+## Lisanslar
 
-```yaml
-web-relay-url: "ws://<alan-adı-veya-ip>:<port>/plugin"
-web-relay-key: "<ANAHTAR>"
-```
-
-## Derleme
-
-```bash
-javac --release 11 -d out PisanRelay.java && printf "Main-Class: PisanRelay\n" > m.txt && jar cfm PisanRelay.jar m.txt -C out .
-```
-
-## Sunucuyu uyandırma
-
-Minecraft sunucusu kapalıyken sayfada **OYNA**'ya basılırsa köprü, gerçek bir Minecraft istemcisi gibi sunucu adresine
-giriş isteği gönderir (1.20.1 el sıkışma + giriş). Exaroton'un "oyuncu girince başlat" özelliği sunucuyu açar; eklenti
-köprüye bağlanınca sayfa kendiliğinden oyuna geçer. Hedef adres varsayılan olarak `pisan-sf-league.exaroton.me`;
-değiştirmek için 3. argüman ya da `MC_SERVER` ortam değişkeni.
+- Köprü kodu: MIT.
+- `web/tex/` içindeki dokular: [Pixel Perfection CE](https://github.com/Athemis/PixelPerfectionCE), CC BY-SA 4.0
+  (`web/tex/LICENSE-PixelPerfectionCE.md`), değiştirilmeden kullanıldı.

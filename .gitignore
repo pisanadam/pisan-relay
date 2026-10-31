@@ -1,2 +1,5 @@
 pisan-relay-key.txt
-out/
+node_modules/
+node/
+relay.log
+relay.pid

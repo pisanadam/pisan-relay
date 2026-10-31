@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#3b2a1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pisan Lig</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root { --text:#fff; --muted:#c8c8c8; --shadow:#3f3f3f; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; overflow:hidden; color:var(--text); touch-action:none; user-select:none; -webkit-user-select:none;
+    font:16px/1.4 "Lucida Console", Monaco, Consolas, monospace; text-shadow:2px 2px 0 var(--shadow); background:#2b1d10; }
+  .screen { position:fixed; inset:0; display:none; }
+  .screen.on { display:block; }
+  .dirt { background-color:#4a3420; background-image:
+      linear-gradient(45deg, rgba(0,0,0,.18) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.18) 75%),
+      linear-gradient(45deg, rgba(0,0,0,.18) 25%, transparent 25%, transparent 75%, rgba(0,0,0,.18) 75%);
+    background-size:32px 32px; background-position:0 0, 16px 16px; }
+  .menu { place-items:center; padding:16px; overflow:auto; touch-action:pan-y; }
+  .screen.menu.on { display:grid; }
+  .box { width:100%; max-width:460px; text-align:center; }
+  h1 { font-size:34px; margin:0 0 6px; color:#ffe36a; letter-spacing:2px; text-shadow:3px 3px 0 #6b4b00; }
+  .sub { color:var(--muted); margin:0 0 16px; font-size:14px; }
+  .mcbtn { display:block; width:100%; margin:8px 0; padding:11px 10px; font:inherit; color:#fff; text-shadow:2px 2px 0 #383838; cursor:pointer;
+    background:#7d7d7d; border:2px solid #000; box-shadow:inset 2px 2px 0 #b8b8b8, inset -2px -2px 0 #565656; }
+  .mcbtn:active, .mcbtn.sel { background:#5a6fb8; box-shadow:inset 2px 2px 0 #8fa3ea, inset -2px -2px 0 #34427a; }
+  .row { display:flex; gap:6px; }
+  .row .mcbtn { margin:4px 0; padding:9px 4px; }
+  .field { width:100%; padding:11px; font:inherit; color:#fff; background:#000; border:2px solid #a0a0a0; outline:none; margin:6px 0; user-select:text; -webkit-user-select:text; }
+  label { display:block; text-align:left; color:var(--muted); font-size:13px; margin-top:8px; }
+  .err { color:#ff6b6b; min-height:22px; font-size:14px; }
+  .note { font-size:12px; color:var(--muted); text-align:left; }
+  h2 { font-size:15px; color:#ffe36a; text-align:left; margin:16px 0 4px; }
+  input[type=range] { width:100%; }
+
+  #game canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #cross { position:absolute; left:50%; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px; pointer-events:none; }
+  #cross::before, #cross::after { content:""; position:absolute; background:rgba(255,255,255,.85); }
+  #cross::before { left:8px; top:0; width:2px; height:18px; } #cross::after { top:8px; left:0; width:18px; height:2px; }
+  #boss { position:absolute; top:max(6px, env(safe-area-inset-top)); left:50%; transform:translateX(-50%); text-align:center; pointer-events:none; font-size:15px; white-space:nowrap; display:none; }
+  #boss .bar { width:240px; height:8px; margin:3px auto 0; background:#3b0a3b; border:1px solid #000; }
+  #boss .bar i { display:block; height:100%; background:#d24bd2; width:100%; }
+  #chat { position:absolute; left:8px; bottom:150px; max-width:62%; pointer-events:none; font-size:13px; }
+  #chat div { background:rgba(0,0,0,.45); padding:2px 6px; transition:opacity .8s; }
+  #title { position:absolute; top:24%; left:0; right:0; text-align:center; font-size:46px; pointer-events:none; }
+  #subtitle { position:absolute; top:calc(24% + 58px); left:0; right:0; text-align:center; font-size:20px; pointer-events:none; }
+  #actionbar { position:absolute; bottom:98px; left:0; right:0; text-align:center; pointer-events:none; font-size:15px; }
+  #hotbar { position:absolute; bottom:max(6px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); display:flex; z-index:3; }
+  #hotbar div { width:44px; height:44px; border:3px solid #555; background:rgba(0,0,0,.45); margin-left:-3px; display:grid; place-items:center; position:relative; }
+  #hotbar div.cur { border-color:#fff; z-index:1; }
+  .icon { width:30px; height:30px; image-rendering:pixelated; }
+  .glow { filter:drop-shadow(0 0 3px #c58cff) drop-shadow(0 0 2px #c58cff); }
+  .count { position:absolute; right:2px; bottom:0; font-size:12px; }
+  #xp { position:absolute; bottom:56px; left:50%; width:360px; max-width:80vw; transform:translateX(-50%); height:7px; background:#000; border:1px solid #222; pointer-events:none; }
+  #xp i { display:block; height:100%; width:0; background:#80ff20; }
+  #xp.power i { background:#b04cff; }
+  #look { position:absolute; right:0; top:0; width:55%; height:100%; }
+  #stick { position:absolute; left:0; bottom:0; width:45%; height:75%; }
+  #knob { position:absolute; width:120px; height:120px; margin:-60px 0 0 -60px; border-radius:50%; border:2px solid rgba(255,255,255,.4); background:rgba(255,255,255,.08); display:none; pointer-events:none; }
+  #knob i { position:absolute; left:50%; top:50%; width:50px; height:50px; margin:-25px 0 0 -25px; border-radius:50%; background:rgba(255,255,255,.45); }
+  .tb { z-index:3; position:absolute; display:grid; place-items:center; text-align:center; font:inherit; font-size:12px; color:#fff; background:rgba(60,60,60,.55); border:2px solid rgba(0,0,0,.7); box-shadow:inset 2px 2px 0 rgba(255,255,255,.25); touch-action:none; }
+  .tb.down, .tb.on { background:rgba(120,160,255,.75); }
+  #bRight { right:max(14px, env(safe-area-inset-right)); bottom:120px; width:84px; height:84px; border-radius:50%; background:rgba(200,60,60,.6); font-size:13px; }
+  #bLeft { right:110px; bottom:150px; width:68px; height:68px; border-radius:50%; }
+  #bJump { right:max(14px, env(safe-area-inset-right)); bottom:216px; width:64px; height:64px; }
+  #bSneak { right:110px; bottom:228px; width:58px; height:58px; }
+  #bRun { left:14px; bottom:max(18px, env(safe-area-inset-bottom)); width:70px; height:42px; }
+  #top { position:absolute; top:max(6px, env(safe-area-inset-top)); right:8px; display:flex; gap:6px; z-index:3; }
+  #top .tb { position:static; width:auto; height:auto; padding:6px 9px; }
+  #overlay { position:absolute; inset:0; display:none; place-items:center; background:rgba(0,0,0,.55); z-index:5; }
+  #overlay.on { display:grid; }
+  .panel { background:#c6c6c6; color:#3f3f3f; text-shadow:none; border:3px solid #fff; border-right-color:#555; border-bottom-color:#555; padding:10px; max-width:96vw; max-height:92vh; overflow:auto; }
+  .panel h3 { margin:0 0 6px; font-size:15px; }
+  .grid { display:grid; grid-template-columns:repeat(9, 44px); gap:2px; }
+  .slot { width:44px; height:44px; background:#8b8b8b; border:2px solid #373737; border-right-color:#fff; border-bottom-color:#fff; display:grid; place-items:center; position:relative; }
+  .slot:active { background:#a5a5ff; }
+  #menuInfo { min-height:40px; font-size:13px; margin-top:6px; color:#202020; white-space:pre-line; max-width:410px; }
+  #chatBox { position:absolute; left:8px; right:8px; bottom:70px; display:none; gap:6px; z-index:6; }
+  #chatBox.on { display:flex; }
+  #chatBox input { flex:1; }
+  @media (orientation:portrait) and (max-width:700px) { body.playing #rotate { display:grid; } }
+  #rotate { position:fixed; inset:0; display:none; place-items:center; text-align:center; padding:24px; z-index:9; font-size:20px; }
+  @media (hover:hover) and (pointer:fine) { #look, #stick, #bRight, #bLeft, #bJump, #bSneak, #bRun { display:none; } }
+</style>
+</head>
+<body>
+<div id="rotate" class="dirt"><div>Telefonu yan çevir ↻</div></div>
+<input type="file" id="packFile" accept=".zip,.jar" style="display:none">
+
+<section id="login" class="screen menu dirt on">
+  <div class="box">
+    <h1>PISAN LIG</h1>
+    <p class="sub">Minecraft sunucusuna tarayıcıdan gerçek oyuncu olarak gir</p>
+    <label for="name">Oyuncu adı</label>
+    <input class="field" id="name" maxlength="9" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
+    <label for="skin">Skin (bir Minecraft kullanıcı adı, isteğe bağlı)</label>
+    <input class="field" id="skin" maxlength="16" placeholder="Notch" autocapitalize="off" spellcheck="false">
+    <label for="sens">Bakış hassasiyeti</label>
+    <input type="range" id="sens" min="0.05" max="1" step="0.05">
+    <div class="err" id="loginErr"></div>
+    <button class="mcbtn" id="go">Oyuna gir</button>
+    <p class="note">Oyunda adının başında <b>(mobil)</b> yazar. Tarayıcı oyuncuları sıralamalara, ELO'ya ve dereceliye girmez.</p>
+    <h2>Doku paketi</h2>
+    <p class="note packName">Varsayılan: Pixel Perfection CE</p>
+    <div class="row"><button class="mcbtn packPick">Kendi paketini yükle</button><button class="mcbtn packReset">Varsayılan</button></div>
+    <p class="note">.zip doku paketi ya da kendi Minecraft 1.20.1 .jar dosyan; sadece bu cihazda açılır. Varsayılan dokular: <a style="color:#9cf" href="https://github.com/Athemis/PixelPerfectionCE" target="_blank" rel="noopener">Pixel Perfection CE</a> (CC BY-SA 4.0).</p>
+  </div>
+</section>
+
+<section id="game" class="screen">
+  <canvas id="cv"></canvas>
+  <div id="cross"></div>
+  <div id="boss"><div id="score"></div><div class="bar"><i></i></div></div>
+  <div id="chat"></div>
+  <div id="title"></div>
+  <div id="subtitle"></div>
+  <div id="actionbar"></div>
+  <div id="xp"><i></i></div>
+  <div id="hotbar"></div>
+  <div id="look"></div>
+  <div id="stick"></div><div id="knob"><i></i></div>
+  <div class="tb" id="bRun">DEPAR</div>
+  <div class="tb" id="bSneak">EĞİL</div>
+  <div class="tb" id="bJump">ZIPLA</div>
+  <div class="tb" id="bLeft">SOL</div>
+  <div class="tb" id="bRight">SAĞ</div>
+  <div id="top"><div class="tb" id="bChat">T</div><div class="tb" id="bCam">F5</div><div class="tb" id="bSet">⚙</div><div class="tb" id="bFs">⛶</div><div class="tb" id="bQuit">Çık</div></div>
+  <div id="chatBox"><input class="field" id="chatInput" maxlength="200" placeholder="Mesaj veya /komut" autocomplete="off"><button class="mcbtn" id="chatSend" style="width:auto">Gönder</button></div>
+  <div id="overlay"><div class="panel" id="panel"></div></div>
+</section>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const show = name => { ["login", "game"].forEach(s => $(s).classList.toggle("on", s === name)); document.body.classList.toggle("playing", name === "game"); };
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  $("name").value = store.get("pisan-web-name") || "";
+  $("skin").value = store.get("pisan-web-skin") || "";
+  let sens = +(store.get("pisan-sens") || 0.3);
+  $("sens").value = sens;
+  $("sens").oninput = () => { sens = +$("sens").value; store.set("pisan-sens", sens); };
+
+  // ---------- Minecraft text: § codes and JSON chat components to coloured HTML ----------
+  const CODES = { "0": "#000000", "1": "#0000aa", "2": "#00aa00", "3": "#00aaaa", "4": "#aa0000", "5": "#aa00aa", "6": "#ffaa00", "7": "#aaaaaa", "8": "#555555", "9": "#5555ff", a: "#55ff55", b: "#55ffff", c: "#ff5555", d: "#ff55ff", e: "#ffff55", f: "#ffffff" };
+  const NAMED = { black: "0", dark_blue: "1", dark_green: "2", dark_aqua: "3", dark_red: "4", dark_purple: "5", gold: "6", gray: "7", dark_gray: "8", blue: "9", green: "a", aqua: "b", red: "c", light_purple: "d", yellow: "e", white: "f" };
+  function legacy(text, base) {
+    let out = "", colour = base || "#ffffff", bold = false;
+    const parts = String(text).split("§");
+    out += span(parts[0], colour, bold);
+    for (let i = 1; i < parts.length; i++) {
+      const c = parts[i].charAt(0).toLowerCase(), rest = parts[i].slice(1);
+      if (CODES[c]) { colour = CODES[c]; bold = false; } else if (c === "l") bold = true; else if (c === "r") { colour = base || "#ffffff"; bold = false; }
+      out += span(rest, colour, bold);
+    }
+    return out;
+  }
+  const span = (t, c, b) => t ? "<span style='color:" + c + (b ? ";font-weight:bold" : "") + "'>" + esc(t) + "</span>" : "";
+  const plain = text => String(text).replace(/§./g, "");
+  const TRANSLATE = { "multiplayer.player.joined": "%s oyuna katıldı", "multiplayer.player.left": "%s oyundan ayrıldı", "chat.type.text": "<%s> %s", "chat.type.announcement": "[%s] %s", "commands.message.display.incoming": "%s sana fısıldıyor: %s" };
+  function component(c, inherited) {
+    if (c == null) return "";
+    if (typeof c === "string") return legacy(c, inherited);
+    if (Array.isArray(c)) return c.map(x => component(x, inherited)).join("");
+    const colour = c.color ? (c.color.startsWith("#") ? c.color : CODES[NAMED[c.color]] || inherited) : inherited;
+    let html = "";
+    if (c.text) html += c.bold ? "<b>" + legacy(c.text, colour) + "</b>" : legacy(c.text, colour);
+    if (c.translate) {
+      const args = (c.with || []).map(a => component(a, colour));
+      let k = 0;
+      html += (TRANSLATE[c.translate] || c.translate).replace(/%s/g, () => args[k++] || "");
+    }
+    if (c.extra) html += c.extra.map(x => component(x, colour)).join("");
+    return html;
+  }
+  const fromJson = json => { try { return component(JSON.parse(json), "#ffffff"); } catch (e) { return esc(json); } };
+
+  // ---------- connection ----------
+  let ws = null, myName = null, myId = null, playing = false;
+  function connect(then) {
+    if (ws && ws.readyState === 1) { then(); return; }
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+    ws.onopen = then;
+    ws.onmessage = e => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+    ws.onclose = () => { ws = null; if (playing) $("loginErr").textContent = "Bağlantı koptu; sunucu kapanmış olabilir."; playing = false; show("login"); };
+  }
+  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  $("go").onclick = () => {
+    const n = $("name").value.trim(), skin = $("skin").value.trim();
+    if (!/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Ad: 3–9 karakter; harf, rakam, _ (oyunda başına (mobil) eklenir)."; return; }
+    if (skin && !/^[A-Za-z0-9_]{1,16}$/.test(skin)) { $("loginErr").textContent = "Skin adı geçersiz."; return; }
+    store.set("pisan-web-name", n); store.set("pisan-web-skin", skin);
+    $("loginErr").textContent = "Bağlanıyor…";
+    connect(() => send({ t: "hello", name: n, skin }));
+  };
+  // ---------- texture pack ----------
+  const idb = cb => { try { const rq = indexedDB.open("pisan", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("kv"); rq.onsuccess = () => cb(rq.result); rq.onerror = () => {}; } catch (e) {} };
+  async function usePack(file, save) {
+    document.querySelectorAll(".packName").forEach(e => e.textContent = "Yükleniyor…");
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const map = new Map();
+      const jobs = [];
+      zip.forEach((path, entry) => {
+        const m = path.match(/^assets\/minecraft\/textures\/block\/([a-z0-9_]+)\.png$/);
+        if (m) jobs.push(entry.async("blob").then(b => map.set(m[1], new Blob([b], { type: "image/png" }))));
+      });
+      await Promise.all(jobs);
+      if (!map.size) throw new Error("Pakette blok dokusu yok");
+      userPack = map; resetTextures();
+      document.querySelectorAll(".packName").forEach(e => e.textContent = "Kendi paketin: " + (file.name || "kayıtlı paket") + " (" + map.size + " doku)");
+      if (save) idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").put(file, "pack"); } catch (e) {} });
+    } catch (err) {
+      document.querySelectorAll(".packName").forEach(e => e.textContent = "Paket okunamadı: " + err.message);
+    }
+  }
+  document.querySelectorAll(".packPick").forEach(b => b.onclick = () => $("packFile").click());
+  document.querySelectorAll(".packReset").forEach(b => b.onclick = () => {
+    userPack = null; resetTextures();
+    idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").delete("pack"); } catch (e) {} });
+    document.querySelectorAll(".packName").forEach(e => e.textContent = "Varsayılan: Pixel Perfection CE");
+  });
+  $("packFile").onchange = () => { const f = $("packFile").files[0]; if (f) usePack(f, true); };
+  idb(db => { try { const rq = db.transaction("kv").objectStore("kv").get("pack"); rq.onsuccess = () => { if (rq.result) usePack(rq.result, false); }; } catch (e) {} });
+
+  // ---------- block textures, drawn here in the Minecraft spirit (no Mojang files) ----------
+  const T = 16, ATLAS = 16;
+  const atlas = document.createElement("canvas"); atlas.width = atlas.height = T * ATLAS;
+  const ac = atlas.getContext("2d");
+  const tiles = new Map(); let nextTile = 0;
+  function rng(seed) { let s = seed >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
+  function hashStr(s) { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; }
+  const hex = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+  const COLORS = {
+    WHITE_CONCRETE: "#cfd5d6", ORANGE_CONCRETE: "#e06101", CYAN_CONCRETE: "#157788", BLUE_CONCRETE: "#2c2e8f", RED_CONCRETE: "#8e2121",
+    LIME_CONCRETE: "#5ea918", GREEN_CONCRETE: "#495b24", GRAY_CONCRETE: "#36393d", LIGHT_GRAY_CONCRETE: "#7d7d73", BLACK_CONCRETE: "#080a0f",
+    YELLOW_CONCRETE: "#f0af15", PURPLE_CONCRETE: "#64209c", SMOOTH_STONE: "#a0a0a0", STONE: "#7d7d7d", POLISHED_BLACKSTONE: "#36313c",
+    POLISHED_BLACKSTONE_WALL: "#36313c", ORANGE_TERRACOTTA: "#a1531d", GREEN_TERRACOTTA: "#4c532a", WHITE_TERRACOTTA: "#d1b2a1",
+    BIRCH_PLANKS: "#c4b27b", OAK_PLANKS: "#a2834f", SPRUCE_PLANKS: "#73552f", OAK_SIGN: "#a2834f", SEA_LANTERN: "#acc8be", GLOWSTONE: "#d4b25f",
+    DIRT: "#866043", GRASS_BLOCK: "#7cbd6b", SAND: "#dbcfa3", QUARTZ_BLOCK: "#ebe5de", SMOOTH_QUARTZ: "#ebe5de", BEDROCK: "#555555",
+    RED_BANNER: "#b02e26", BLUE_BANNER: "#3c44aa", WHITE_WOOL: "#e9ecec", RED_WOOL: "#a12722", BLUE_WOOL: "#35399d"
+  };
+  function colorOf(name) {
+    if (COLORS[name]) return COLORS[name];
+    if (name.includes("GLASS")) return "#d8f0ff";
+    const h = hashStr(name); return "#" + ((h & 0x7f7f7f) + 0x303030).toString(16).padStart(6, "0").slice(-6);
+  }
+  // ---------- real block textures: the player's own pack (zip/jar, read on this device) or the bundled one ----------
+  let userPack = null;
+  const imgCache = new Map();
+  function loadImg(file) {
+    if (imgCache.has(file)) return imgCache.get(file);
+    const pr = new Promise(res => {
+      const blob = userPack && userPack.get(file);
+      const img = new Image();
+      img.onload = () => res(img); img.onerror = () => res(null);
+      img.src = blob ? URL.createObjectURL(blob) : "/tex/" + file + ".png";
+    });
+    imgCache.set(file, pr); return pr;
+  }
+  function candidates(name, face) {
+    let m = name.toLowerCase();
+    if (m === "grass_block") return face === "top" ? ["grass_block_top"] : face === "bottom" ? ["dirt"] : ["grass_block_side"];
+    if (m.endsWith("_banner")) return [m.replace("_banner", "_wool")];
+    if (m.endsWith("_wall_sign") || m.endsWith("_sign")) return [m.replace(/_wall_sign$|_sign$/, "_planks")];
+    if (m.endsWith("_pane")) m = m.slice(0, -5);
+    for (const suffix of ["_wall", "_slab", "_stairs", "_fence"]) if (m.endsWith(suffix)) { const b = m.slice(0, -suffix.length); return [b, b + "s", b + "_planks"]; }
+    if (face === "top") return [m + "_top", m];
+    if (face === "bottom") return [m + "_bottom", m + "_top", m];
+    return [m + "_side", m];
+  }
+  const TINT = { grass_block_top: [145, 189, 89], grass_block_side_overlay: [145, 189, 89], oak_leaves: [119, 171, 47] };
+  async function realTexture(name, face, tx, ty) {
+    for (const file of candidates(name, face)) {
+      const img = await loadImg(file);
+      if (!img) continue;
+      const c = document.createElement("canvas"); c.width = c.height = T; const g = c.getContext("2d");
+      g.imageSmoothingEnabled = false;
+      g.drawImage(img, 0, 0, img.width, img.width, 0, 0, T, T); // animated strips: first frame
+      const tint = TINT[file];
+      const data = g.getImageData(0, 0, T, T);
+      if (tint) for (let i = 0; i < data.data.length; i += 4) for (let k = 0; k < 3; k++) data.data[i + k] = data.data[i + k] * tint[k] / 255;
+      if (file === "grass_block_side") {
+        const over = await loadImg("grass_block_side_overlay");
+        if (over) {
+          const o = document.createElement("canvas"); o.width = o.height = T; const og = o.getContext("2d"); og.imageSmoothingEnabled = false;
+          og.drawImage(over, 0, 0, over.width, over.width, 0, 0, T, T);
+          const od = og.getImageData(0, 0, T, T).data;
+          for (let i = 0; i < od.length; i += 4) if (od[i + 3] > 128) for (let k = 0; k < 3; k++) data.data[i + k] = od[i + k] * TINT.grass_block_side_overlay[k] / 255;
+        }
+      }
+      ac.clearRect(tx, ty, T, T); ac.putImageData(data, tx, ty);
+      atlasTex.needsUpdate = true;
+      return;
+    }
+  }
+  function resetTextures() { tiles.clear(); nextTile = 0; imgCache.clear(); ac.clearRect(0, 0, atlas.width, atlas.height); }
+
+  function tile(name, face) {
+    const key = name + "|" + face;
+    if (tiles.has(key)) return tiles.get(key);
+    const id = nextTile++; const tx = (id % ATLAS) * T, ty = Math.floor(id / ATLAS) * T;
+    const r = rng(hashStr(key));
+    const base = hex(colorOf(name));
+    const vary = (c, amt) => { const k = (r() - 0.5) * amt; return c.map(v => Math.max(0, Math.min(255, Math.round(v + k)))); };
+    const glass = name.includes("GLASS");
+    ac.clearRect(tx, ty, T, T);
+    for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+      let c = vary(base, name.includes("CONCRETE") ? 8 : 26), a = 1;
+      if (glass) { const edge = x === 0 || y === 0 || x === T - 1 || y === T - 1; a = edge ? 0.85 : 0.15; c = edge ? [230, 240, 250] : [210, 235, 250]; if (!edge && (x === y + 3 || x === y + 4) && x < 10) a = 0.5; }
+      if (name.includes("PLANKS") || name.endsWith("_SIGN")) { if (y % 4 === 0) c = c.map(v => v * 0.78); if ((x + (y >> 2) * 5) % 16 === 0) c = c.map(v => v * 0.8); }
+      if (name === "SEA_LANTERN" || name === "GLOWSTONE") { if (x % 5 === 0 || y % 5 === 0) c = c.map(v => Math.min(255, v + 40)); }
+      if (name === "GRASS_BLOCK") { if (face === "side") c = y < 3 + (r() * 2 | 0) ? vary(hex("#6aaa4f"), 30) : vary(hex("#866043"), 30); if (face === "bottom") c = vary(hex("#866043"), 30); }
+      if (name.includes("BLACKSTONE") && r() < 0.12) c = c.map(v => v * 0.7);
+      if ((name.includes("TERRACOTTA") || name === "STONE" || name === "SMOOTH_STONE") && r() < 0.1) c = c.map(v => v * 0.85);
+      if (name === "SMOOTH_STONE" && (y === 0 || y === T - 1)) c = c.map(v => v * 0.8);
+      ac.fillStyle = "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; ac.fillRect(tx + x, ty + y, 1, 1);
+    }
+    realTexture(name, face, tx, ty);
+    const e = 0.02 / ATLAS;
+    const uv = [tx / atlas.width + e, 1 - (ty + T) / atlas.height + e, (tx + T) / atlas.width - e, 1 - ty / atlas.height - e];
+    tiles.set(key, uv); return uv;
+  }
+  const atlasTex = new THREE.CanvasTexture(atlas);
+  atlasTex.magFilter = THREE.NearestFilter; atlasTex.minFilter = THREE.NearestFilter;
+
+  // ---------- scene ----------
+  const cv = $("cv");
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#78a7ff");
+  scene.fog = new THREE.Fog("#a9c6ff", 45, 120);
+  const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 300);
+  function resize() { const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  addEventListener("resize", resize);
+  const worldGroup = new THREE.Group(); scene.add(worldGroup);
+  function clearWorld() { while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); } }
+
+  const TRANSPARENT = n => n.includes("GLASS");
+  const SKIP = n => n === "AIR" || n === "CAVE_AIR" || n === "VOID_AIR" || n === "BARRIER" || n === "LIGHT" || n.endsWith("_SIGN") || n.includes("TORCH") || n.includes("BANNER");
+  const FACES = [
+    { d: [1, 0, 0], shade: 0.6, f: "side", c: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]] },
+    { d: [-1, 0, 0], shade: 0.6, f: "side", c: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]] },
+    { d: [0, 1, 0], shade: 1.0, f: "top", c: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] },
+    { d: [0, -1, 0], shade: 0.5, f: "bottom", c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] },
+    { d: [0, 0, 1], shade: 0.8, f: "side", c: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]] },
+    { d: [0, 0, -1], shade: 0.8, f: "side", c: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]] }
+  ];
+  function quad(buf, name, f, pts) {
+    const uv = tile(name, f.f); const base = buf.pos.length / 3;
+    for (const p of pts) buf.pos.push(p[0], p[1], p[2]);
+    buf.uv.push(uv[0], uv[1], uv[0], uv[3], uv[2], uv[3], uv[2], uv[1]);
+    for (let k = 0; k < 4; k++) buf.col.push(f.shade, f.shade, f.shade);
+    buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  function buildWorld(o) {
+    clearWorld();
+    const nx = o.nx, ny = o.ny, nz = o.nz, n = nx * ny * nz;
+    const ids = new Uint16Array(n); let p = 0;
+    for (const part of o.runs.split(",")) { const [id, cnt] = part.split("*"); const c = cnt ? +cnt : 1; ids.fill(+id, p, p + c); p += c; }
+    const at = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) ? 0 : ids[(y * nz + z) * nx + x];
+    const pal = o.pal;
+    region = { ids, nx, ny, nz, x0: o.x0, y0: o.y0, z0: o.z0, pal };
+    const solid = id => id !== 0 && !SKIP(pal[id]) && !TRANSPARENT(pal[id]);
+    const out = { o: { pos: [], uv: [], col: [], idx: [] }, t: { pos: [], uv: [], col: [], idx: [] } };
+    for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
+      const id = ids[(y * nz + z) * nx + x]; if (!id) continue;
+      const name = pal[id]; if (SKIP(name)) continue;
+      const trans = TRANSPARENT(name); const buf = trans ? out.t : out.o;
+      for (const f of FACES) {
+        const nb = at(x + f.d[0], y + f.d[1], z + f.d[2]);
+        if (solid(nb) || (trans && nb === id)) continue;
+        quad(buf, name, f, f.c.map(c => [o.x0 + x + c[0], o.y0 + y + c[1], o.z0 + z + c[2]]));
+      }
+    }
+    // Block displays (goal posts, nets, flags): scaled boxes.
+    for (const d of o.disp || []) {
+      const [x, y, z, sx, sy, sz, name] = d;
+      const boxes = name.includes("BANNER")
+        ? [[x + 0.45, y, z + 0.45, 0.1, 2.0, 0.1, "SPRUCE_PLANKS"], [x + 0.05, y + 0.9, z + 0.47, 0.9, 1.1, 0.06, name.includes("RED") ? "RED_WOOL" : "BLUE_WOOL"]]
+        : [[x, y, z, sx, sy, sz, name]];
+      for (const [bx, by, bz, w, h, dd, nm] of boxes) {
+        const buf = TRANSPARENT(nm) ? out.t : out.o;
+        for (const f of FACES) quad(buf, nm, f, f.c.map(c => [bx + c[0] * w, by + c[1] * h, bz + c[2] * dd]));
+      }
+    }
+    atlasTex.needsUpdate = true;
+    for (const [key, b] of Object.entries(out)) {
+      if (!b.idx.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(b.pos, 3));
+      g.setAttribute("uv", new THREE.Float32BufferAttribute(b.uv, 2));
+      g.setAttribute("color", new THREE.Float32BufferAttribute(b.col, 3));
+      g.setIndex(b.idx);
+      const t = key === "t";
+      const m = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: t, side: t ? THREE.DoubleSide : THREE.FrontSide, depthWrite: !t });
+      const mesh = new THREE.Mesh(g, m); mesh.renderOrder = t ? 2 : 0; worldGroup.add(mesh);
+    }
+  }
+
+  // ---------- players: the classic 64x64 skin layout ----------
+  const skinCache = new Map();
+  function defaultSkin(team) {
+    const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+    const shirt = team === 0 ? "#b3312c" : team === 1 ? "#2b47b8" : "#2f9c52";
+    const fill = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+    fill(0, 8, 32, 8, "#c58c69"); fill(8, 0, 16, 8, "#3b2614"); fill(0, 8, 32, 2, "#3b2614"); fill(16, 0, 8, 8, "#c58c69");
+    fill(9, 12, 2, 1, "#ffffff"); fill(13, 12, 2, 1, "#ffffff"); fill(10, 12, 1, 1, "#3b4fa0"); fill(13, 12, 1, 1, "#3b4fa0"); fill(10, 14, 4, 1, "#7a4a33");
+    fill(16, 16, 24, 16, shirt); fill(40, 16, 16, 16, shirt); fill(44, 16, 8, 4, shirt); fill(40, 28, 16, 4, "#c58c69"); fill(32, 48, 16, 16, shirt); fill(32, 60, 16, 4, "#c58c69");
+    fill(0, 16, 16, 16, "#2c2c54"); fill(16, 48, 16, 16, "#2c2c54"); fill(0, 28, 16, 4, "#3a3a3a"); fill(16, 60, 16, 4, "#3a3a3a");
+    fill(20, 21, 8, 2, "#ffffff");
+    return c;
+  }
+  // Until the league ball's texture arrives: a white ball with black patches on every face of the head box.
+  function defaultBall() {
+    const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+    g.fillStyle = "#f2f2f2"; g.fillRect(0, 0, 32, 16);
+    g.fillStyle = "#222";
+    for (const [x, y] of [[8, 0], [16, 0], [0, 8], [8, 8], [16, 8], [24, 8]]) { g.fillRect(x + 3, y + 3, 2, 2); g.fillRect(x, y, 1, 1); g.fillRect(x + 7, y, 1, 1); g.fillRect(x, y + 7, 1, 1); g.fillRect(x + 7, y + 7, 1, 1); }
+    return c;
+  }
+  function skinTexture(key, team) {
+    const id = (key || "") + "#" + team;
+    if (skinCache.has(id)) return skinCache.get(id);
+    const tex = new THREE.CanvasTexture(key === "@ball" ? defaultBall() : defaultSkin(team));
+    tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+    const entry = { tex };
+    skinCache.set(id, entry);
+    if (key) {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+        g.drawImage(img, 0, 0);
+        if (img.height === 32) { g.drawImage(img, 0, 16, 16, 16, 16, 48, 16, 16); g.drawImage(img, 40, 16, 16, 16, 32, 48, 16, 16); }
+        entry.tex.image = c; entry.tex.needsUpdate = true;
+      };
+      img.src = "/skin/" + encodeURIComponent(key);
+    }
+    return entry;
+  }
+  function boxUV(geo, u, v, w, h, d) {
+    const S = 64, uvs = geo.attributes.uv;
+    const rect = (face, x0, y0, x1, y1) => { const a = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]; for (let i = 0; i < 4; i++) uvs.setXY(face * 4 + i, a[i][0] / S, 1 - a[i][1] / S); };
+    rect(0, u + d + w, v + d, u + d + w + d, v + d + h);       // +x: the player's left
+    rect(1, u, v + d, u + d, v + d + h);                       // -x: the player's right
+    rect(2, u + d, v, u + d + w, v + d);                       // top
+    rect(3, u + d + w, v + d, u + d + w + w, v);               // bottom
+    rect(4, u + d, v + d, u + d + w, v + d + h);               // front (+z)
+    rect(5, u + 2 * d + w, v + d, u + 2 * d + 2 * w, v + d + h); // back
+    uvs.needsUpdate = true;
+  }
+  const PX = 1 / 16;
+  function part(mat, u, v, w, h, d, inflate) {
+    const geo = new THREE.BoxGeometry((w + inflate) * PX, (h + inflate) * PX, (d + inflate) * PX);
+    boxUV(geo, u, v, w, h, d);
+    return new THREE.Mesh(geo, mat);
+  }
+  function nameTag(text, team) {
+    const c = document.createElement("canvas"); const g = c.getContext("2d");
+    g.font = "bold 28px monospace"; const w = Math.ceil(g.measureText(text).width) + 16; c.width = w; c.height = 40;
+    g.font = "bold 28px monospace"; g.fillStyle = "rgba(0,0,0,.4)"; g.fillRect(0, 0, w, 40);
+    g.fillStyle = team === 0 ? "#ff5555" : team === 1 ? "#5599ff" : "#ffffff"; g.fillText(text, 8, 30);
+    const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    s.scale.set(w / 40 * 0.32, 0.32, 1); s.position.y = 2.15; s.renderOrder = 5;
+    return s;
+  }
+  function makeAvatar(p) {
+    const entry = skinTexture(p.skin, p.team);
+    const mat = new THREE.MeshBasicMaterial({ map: entry.tex, transparent: true, alphaTest: 0.5 });
+    const root = new THREE.Group();
+    const body = new THREE.Group(); root.add(body);
+    const head = new THREE.Group(); head.position.y = 24 * PX; body.add(head);
+    const h1 = part(mat, 0, 0, 8, 8, 8, 0); h1.position.y = 4 * PX; head.add(h1);
+    const h2 = part(mat, 32, 0, 8, 8, 8, 1); h2.position.y = 4 * PX; head.add(h2);
+    const torso = part(mat, 16, 16, 8, 12, 4, 0); torso.position.y = 18 * PX; body.add(torso);
+    const limb = (u, v, x, y) => { const g = new THREE.Group(); g.position.set(x * PX, y * PX, 0); const m = part(mat, u, v, 4, 12, 4, 0); m.position.y = -6 * PX; g.add(m); body.add(g); return g; };
+    const armR = limb(40, 16, -6, 24), armL = limb(32, 48, 6, 24), legR = limb(0, 16, -2, 12), legL = limb(16, 48, 2, 12);
+    if (p.name) root.add(nameTag(p.name, p.team));
+    scene.add(root);
+    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z };
+  }
+  const avatars = new Map();
+
+  // the ball: a player-head cube with the league ball's texture
+  const ballMat = new THREE.MeshBasicMaterial({ map: skinTexture("@ball", -1).tex });
+  const ball = part(ballMat, 0, 0, 8, 8, 8, 0); ball.scale.setScalar(0.42 / (8 * PX)); scene.add(ball);
+  const ballShadow = new THREE.Mesh(new THREE.CircleGeometry(0.22, 16), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }));
+  ballShadow.rotation.x = -Math.PI / 2; scene.add(ballShadow);
+
+
+  // ---------- messages ----------
+  let snaps = [], texts = new Map();
+  function onMessage(o) {
+    switch (o.t) {
+      case "error": $("loginErr").textContent = o.text; if (playing) { playing = false; show("login"); } break;
+      case "waking": waking(o.text); break;
+      case "welcome":
+        clearInterval(wakeTimer); wakeStart = 0; $("loginErr").style.color = "";
+        myName = o.name; myId = o.me; playing = true; me.ready = false; snaps = [];
+        $("loginErr").textContent = ""; $("chat").innerHTML = ""; closeOverlay();
+        show("game"); resize();
+        break;
+      case "world": buildWorld(o); break;
+      case "s": snaps.push({ at: performance.now(), d: o }); if (snaps.length > 8) snaps.shift(); hud(o); break;
+      case "hotbar": hotbar(o); break;
+      case "texts": setTexts(o.list); break;
+      case "text": onText(o.kind, o.json); break;
+      case "menu": openMenu(o); break;
+      case "menuclose": closeOverlay(); break;
+    }
+  }
+  // Before we are in: the relay's Minecraft client is knocking (exaroton starts the server on a join attempt).
+  let wakeTimer = 0, wakeStart = 0;
+  function waking(text) {
+    if (!wakeStart) wakeStart = Date.now();
+    const show = () => { $("loginErr").style.color = "#ffe36a"; $("loginErr").textContent = (text || "Sunucu başlatılıyor…") + " (" + Math.round((Date.now() - wakeStart) / 1000) + " sn)"; };
+    show(); clearInterval(wakeTimer); wakeTimer = setInterval(show, 1000);
+  }
+  function chat(html) {
+    const d = document.createElement("div"); d.innerHTML = html; $("chat").appendChild(d);
+    while ($("chat").children.length > 7) $("chat").firstChild.remove();
+    setTimeout(() => { d.style.opacity = 0; setTimeout(() => d.remove(), 900); }, 9000);
+  }
+  let titleTimer = 0, barTimer = 0;
+  function onText(kind, json) {
+    const html = fromJson(json);
+    if (kind === "chat") chat(html);
+    else if (kind === "actionbar") { $("actionbar").innerHTML = html; clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 3000); }
+    else if (kind === "title" || kind === "subtitle") {
+      $(kind).innerHTML = html; clearTimeout(titleTimer);
+      titleTimer = setTimeout(() => { $("title").innerHTML = ""; $("subtitle").innerHTML = ""; }, 3000);
+    }
+  }
+  function hud(o) {
+    if (o.r === undefined) { $("boss").style.display = "none"; return; }
+    $("boss").style.display = "block";
+    $("score").innerHTML = "<span style='color:#ff5555'>Kırmızı " + o.r + "</span> - <span style='color:#5599ff'>" + o.bl + " Mavi</span> <span style='color:#ddd'>" + esc(o.c) + "</span>";
+  }
+
+  // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
+  const ITEM_ALIAS = { compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
+  function iconFor(item) {
+    const img = document.createElement("img"); img.className = "icon" + (item.glow ? " glow" : ""); img.draggable = false;
+    if (item.m === "player_head") {
+      const c = document.createElement("canvas"); c.width = c.height = 8; c.className = img.className;
+      const g = c.getContext("2d"); g.fillStyle = "#c58c69"; g.fillRect(0, 0, 8, 8);
+      if (item.skin) { const s = new Image(); s.onload = () => { g.drawImage(s, 8, 8, 8, 8, 0, 0, 8, 8); g.drawImage(s, 40, 8, 8, 8, 0, 0, 8, 8); }; s.src = "/skin/" + encodeURIComponent(item.skin); }
+      return c;
+    }
+    const name = ITEM_ALIAS[item.m] || item.m;
+    const tries = [userPackUrl("item/" + name), "/tex/item/" + name + ".png", userPackUrl(name), "/tex/" + name + ".png", "/tex/" + name + "_side.png", "/tex/" + name + "_top.png"].filter(Boolean);
+    let k = 0;
+    img.onerror = () => { if (++k < tries.length) img.src = tries[k]; else img.replaceWith(Object.assign(document.createElement("span"), { textContent: "▪", style: "font-size:22px" })); };
+    img.src = tries[0];
+    return img;
+  }
+  function userPackUrl(file) { const b = userPack && userPack.get(file); return b ? URL.createObjectURL(b) : null; }
+  function slotEl(item) {
+    const d = document.createElement("div");
+    if (item && item.m) { d.appendChild(iconFor(item)); if (item.n) d.appendChild(Object.assign(document.createElement("span"), { className: "count", textContent: item.n })); }
+    return d;
+  }
+  let held = 0;
+  function hotbar(o) {
+    const bar = $("hotbar"); bar.innerHTML = ""; held = o.held;
+    o.items.forEach((item, i) => {
+      const d = slotEl(item); if (i === o.held) d.className = "cur";
+      d.onpointerdown = e => { e.stopPropagation(); send({ t: "slot", i }); if (item && item.name) showInfo(item); };
+      bar.appendChild(d);
+    });
+  }
+  let infoTimer = 0;
+  function showInfo(item) {
+    $("actionbar").innerHTML = legacy(item.name || item.m); clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 2000);
+  }
+
+  // ---------- menus (chest-style inventories the server opens) ----------
+  function openMenu(o) {
+    const p = $("panel"); p.innerHTML = "";
+    const h = document.createElement("h3"); h.innerHTML = legacy(o.title, "#404040"); p.appendChild(h);
+    const grid = document.createElement("div"); grid.className = "grid";
+    o.items.forEach((item, slot) => {
+      const d = slotEl(item); d.className = "slot";
+      let pressTimer = 0, long = false;
+      d.onpointerdown = e => { e.preventDefault(); long = false; pressTimer = setTimeout(() => { long = true; info(item); send({ t: "click", slot, right: true }); }, 550); info(item); };
+      d.onpointerup = () => { clearTimeout(pressTimer); if (!long) send({ t: "click", slot, right: false }); };
+      d.onpointerleave = () => clearTimeout(pressTimer);
+      grid.appendChild(d);
+    });
+    p.appendChild(grid);
+    const infoEl = document.createElement("div"); infoEl.id = "menuInfo"; p.appendChild(infoEl);
+    const close = document.createElement("button"); close.className = "mcbtn"; close.textContent = "Kapat"; close.onclick = () => { send({ t: "close" }); closeOverlay(); };
+    p.appendChild(close);
+    $("overlay").classList.add("on");
+    function info(item) { infoEl.innerHTML = item && item.m ? legacy(item.name || item.m, "#ffffff").replace(/color:#ffffff/g, "color:#202020") + (item.lore ? "<br>" + item.lore.map(l => legacy(l, "#555555")).join("<br>") : "") : ""; }
+  }
+  function closeOverlay() { $("overlay").classList.remove("on"); }
+
+  // ---------- settings ----------
+  $("bSet").onclick = () => {
+    const p = $("panel"); p.innerHTML = "<h3>Ayarlar</h3><label style='color:#333'>Bakış hassasiyeti</label>";
+    const r = document.createElement("input"); r.type = "range"; r.min = 0.05; r.max = 1; r.step = 0.05; r.value = sens; r.oninput = () => { sens = +r.value; store.set("pisan-sens", sens); $("sens").value = sens; };
+    p.appendChild(r);
+    const c = document.createElement("button"); c.className = "mcbtn"; c.textContent = "Tamam"; c.onclick = closeOverlay; p.appendChild(c);
+    $("overlay").classList.add("on");
+  };
+  $("bChat").onclick = () => { $("chatBox").classList.toggle("on"); if ($("chatBox").classList.contains("on")) $("chatInput").focus(); };
+  const sendChat = () => { const t = $("chatInput").value.trim(); if (t) send({ t: "chat", text: t }); $("chatInput").value = ""; $("chatBox").classList.remove("on"); };
+  $("chatSend").onclick = sendChat;
+  $("chatInput").addEventListener("keydown", e => { e.stopPropagation(); if (e.key === "Enter") sendChat(); if (e.key === "Escape") $("chatBox").classList.remove("on"); });
+  $("bQuit").onclick = () => { if (confirm("Oyundan çıkılsın mı?")) { playing = false; ws && ws.close(); show("login"); } };
+  $("bFs").onclick = () => { const el = document.documentElement; if (!document.fullscreenElement) { (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el); try { screen.orientation.lock("landscape").catch(() => {}); } catch (e) {} } else document.exitFullscreen(); };
+  let thirdPerson = false;
+  $("bCam").onclick = () => { thirdPerson = !thirdPerson; };
+
+  // ---------- floating texts (lobby leaderboards) ----------
+  function textSprite(text) {
+    const lines = String(text).split("\n");
+    const c = document.createElement("canvas"); const g = c.getContext("2d");
+    const fs = 26; g.font = "bold " + fs + "px monospace";
+    const w = Math.min(1400, Math.max(...lines.map(l => g.measureText(plain(l)).width)) + 24);
+    c.width = w; c.height = lines.length * (fs + 6) + 16;
+    g.fillStyle = "rgba(8,16,36,.67)"; g.fillRect(0, 0, c.width, c.height);
+    g.font = "bold " + fs + "px monospace"; g.textBaseline = "top";
+    lines.forEach((line, i) => {
+      const parts = line.split("§"); let colour = "#ffffff";
+      const segs = [{ t: parts[0], c: colour }];
+      for (let k = 1; k < parts.length; k++) { const code = parts[k].charAt(0).toLowerCase(); if (CODES[code]) colour = CODES[code]; else if (code === "r") colour = "#ffffff"; segs.push({ t: parts[k].slice(1), c: colour }); }
+      const total = segs.reduce((a, s) => a + g.measureText(s.t).width, 0);
+      let x = (c.width - total) / 2;
+      for (const s of segs) { g.fillStyle = "#000"; g.fillText(s.t, x + 2, 10 + i * (fs + 6) + 2); g.fillStyle = s.c; g.fillText(s.t, x, 10 + i * (fs + 6)); x += g.measureText(s.t).width; }
+    });
+    const tex = new THREE.CanvasTexture(c); tex.minFilter = THREE.LinearFilter;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+    const scale = 0.011 * 1.1; s.scale.set(c.width * scale, c.height * scale, 1);
+    return s;
+  }
+  function setTexts(list) {
+    const seen = new Set();
+    for (const [id, x, y, z, text] of list) {
+      seen.add(id);
+      const old = texts.get(id);
+      if (old && old.text === text) continue;
+      if (old) scene.remove(old.sprite);
+      const s = textSprite(text); s.position.set(x, y + s.scale.y / 2, z); scene.add(s);
+      texts.set(id, { sprite: s, text });
+    }
+    for (const [id, t] of texts) if (!seen.has(id)) { scene.remove(t.sprite); texts.delete(id); }
+  }
+
+  // ---------- me: moved here like a Minecraft client (collisions with the blocks), checked by the server ----------
+  const me = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, sneak: false, run: false, ready: false, vy: 0, tp: -1 };
+  let region = null, frozen = false, spectating = false, tickAcc = 0, jumpSent = false;
+  const PASS = n => n === "AIR" || n === "CAVE_AIR" || n === "VOID_AIR" || n === "LIGHT" || n === "WATER" || n === "LAVA" || n.endsWith("_SIGN") || n.includes("TORCH") || n.includes("BANNER") || n.includes("CARPET") || n.endsWith("_BUTTON") || n.includes("PRESSURE_PLATE") || n === "GRASS" || n === "SHORT_GRASS" || n === "TALL_GRASS";
+  function blockSolid(bx, by, bz) {
+    if (!region) return false;
+    const x = bx - region.x0, y = by - region.y0, z = bz - region.z0;
+    if (x < 0 || y < 0 || z < 0 || x >= region.nx || y >= region.ny || z >= region.nz) return false;
+    const id = region.ids[(y * region.nz + z) * region.nx + x];
+    return id !== 0 && !PASS(region.pal[id]);
+  }
+  function solid(x, y, z, h) {
+    for (let bx = Math.floor(x - 0.299); bx <= Math.floor(x + 0.299); bx++)
+      for (let bz = Math.floor(z - 0.299); bz <= Math.floor(z + 0.299); bz++)
+        for (let by = Math.floor(y); by <= Math.floor(y + h - 0.001); by++)
+          if (blockSolid(bx, by, bz)) return true;
+    return false;
+  }
+  /* One game tick (50 ms) of walking, falling and jumping. */
+  function physicsTick() {
+    const ground = solid(me.x, me.y - 0.02, me.z, 0.02);
+    if (input.jump && ground) { me.vy = 0.42; jumpSent = true; }
+    input.jump = false;
+    const yaw = me.yaw * Math.PI / 180, fx = -Math.sin(yaw), fz = Math.cos(yaw);
+    let mx = fx * input.f + (-fz) * input.s, mz = fz * input.f + fx * input.s;
+    const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
+    if (frozen) { mx = 0; mz = 0; }
+    const speed = me.sneak ? 0.065 : (me.run && input.f > 0.3 ? 0.28 : 0.216);
+    let nx = me.x + mx * speed; if (solid(nx, me.y, me.z, 1.8)) nx = me.x;
+    let nz = me.z + mz * speed; if (solid(nx, me.y, nz, 1.8)) nz = me.z;
+    let ny = me.y;
+    if (!ground || me.vy > 0) {
+      me.vy = (me.vy - 0.08) * 0.98; ny = me.y + me.vy;
+      if (me.vy < 0 && solid(nx, ny, nz, 0.01)) { ny = Math.floor(ny) + 1; while (solid(nx, ny, nz, 0.01) && ny < me.y + 1) ny += 1; me.vy = 0; }
+      else if (me.vy > 0 && solid(nx, ny, nz, 1.8)) { ny = me.y; me.vy = 0; }
+    } else me.vy = 0;
+    me.x = nx; me.y = ny; me.z = nz;
+  }
+  const input = { f: 0, s: 0, jump: false };
+  let charge = -1;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const lerpAngle = (a, b, t) => a + ((((b - a) % 360) + 540) % 360 - 180) * t;
+  function sample() {
+    if (!snaps.length) return null;
+    const now = performance.now() - 100;
+    let a = snaps[0], b = snaps[snaps.length - 1];
+    for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
+    const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
+    const prev = new Map(a.d.p.map(q => [q[0], q]));
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", keeper: String(q[0]).startsWith("a") }; });
+    const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
+    return { people, ball, latest: b.d };
+  }
+
+  let lastFrame = performance.now(), lastBall = null, lastTurn = null;
+  function frame() {
+    requestAnimationFrame(frame);
+    if (!playing || !$("game").classList.contains("on")) return;
+    const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
+    const st = sample();
+    let cam = null;
+    if (st) {
+      const mine = st.latest.me;
+      cam = st.latest.cam || null;
+      frozen = st.latest.ph === "wait";
+      spectating = !!cam;
+      if (mine) {
+        // Server teleports (kick-off, refused steps) and the first state put us where the server says.
+        if (!me.ready || st.latest.tp !== me.tp) {
+          me.x = mine[0]; me.y = mine[1]; me.z = mine[2]; me.vy = 0; me.tp = st.latest.tp;
+          if (!me.ready) { const self = st.latest.p.find(q => q[0] === myId); if (self) me.yaw = self[6]; }
+          me.ready = true;
+        }
+        // The real Minecraft client in the relay is the one that moves; follow it smoothly.
+        const ex = mine[0] - me.x, ey = mine[1] - me.y, ez = mine[2] - me.z;
+        if (Math.hypot(ex, ez) > 3 || Math.abs(ey) > 3) { me.x = mine[0]; me.y = mine[1]; me.z = mine[2]; me.vy = 0; }
+        else { const k = Math.min(1, dt * 5); me.x += ex * k; me.z += ez * k; if (Math.abs(ey) > 0.05) me.y += ey * Math.min(1, dt * 10); }
+        if (st.latest.yaw !== undefined && st.latest !== lastTurn) { lastTurn = st.latest; me.yaw = st.latest.yaw; me.pitch = st.latest.pitch; }
+        if (!spectating) {
+          tickAcc += dt;
+          while (tickAcc >= 0.05) { tickAcc -= 0.05; physicsTick(); sendInput(true); }
+        }
+      }
+      const seen = new Set();
+      for (const p of st.people) {
+        seen.add(p.id);
+        let a = avatars.get(p.id);
+        if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
+        const isMe = p.id === myId;
+        const px = isMe ? me.x : p.x, py = isMe ? me.y : p.y, pz = isMe ? me.z : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
+        const moved = Math.hypot(px - a.x, pz - a.z); a.x = px; a.z = pz;
+        a.phase += Math.min(0.6, moved * 2.2);
+        const swing = Math.sin(a.phase) * Math.min(1, moved * 12) * 0.9;
+        a.root.position.set(px, py, pz);
+        a.root.rotation.y = -yawDeg * Math.PI / 180;
+        a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
+        a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
+        a.body.rotation.x = sneak ? 0.45 : 0; a.body.position.y = sneak ? -0.2 : 0;
+        a.root.visible = !(isMe && !thirdPerson && !cam);
+      }
+      for (const [id, a] of avatars) if (!seen.has(id)) { scene.remove(a.root); avatars.delete(id); }
+      const b = st.ball;
+      ball.visible = ballShadow.visible = !!b;
+      if (b) {
+        ball.position.set(b[0], b[1], b[2]);
+        if (lastBall) { ball.rotation.x += (b[2] - lastBall[2]) * 2.5; ball.rotation.z -= (b[0] - lastBall[0]) * 2.5; }
+        lastBall = b;
+        ballShadow.position.set(b[0], Math.floor(b[1] - 0.25) + 1.02, b[2]); ballShadow.material.opacity = 0.3;
+      }
+    }
+    if (cam) {
+      const y = cam[3] * Math.PI / 180, p = cam[4] * Math.PI / 180;
+      const d = new THREE.Vector3(-Math.sin(y) * Math.cos(p), -Math.sin(p), Math.cos(y) * Math.cos(p));
+      camera.position.set(cam[0], cam[1] + 1.62, cam[2]); camera.lookAt(camera.position.clone().add(d));
+    } else {
+      const yaw = me.yaw * Math.PI / 180, pitch = me.pitch * Math.PI / 180;
+      const dir = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+      const eye = new THREE.Vector3(me.x, me.y + (me.sneak ? 1.27 : 1.62), me.z);
+      if (thirdPerson) { camera.position.copy(eye).addScaledVector(dir, -4); camera.position.y += 0.4; } else camera.position.copy(eye);
+      camera.lookAt(eye.clone().add(dir));
+    }
+    const xp = $("xp");
+    if (charge >= 0) { const p = Math.min(1, (performance.now() - charge) / 1200); xp.firstChild.style.width = (p * 100) + "%"; xp.classList.toggle("power", p >= 1); }
+    else { xp.firstChild.style.width = "0"; xp.classList.remove("power"); }
+    renderer.render(scene, camera);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------- input: phone (joystick, look drag, buttons) and desktop (WASD + mouse) ----------
+  let lastSent = 0;
+  function sendInput(force) {
+    if (!me.ready) return;
+    const now = performance.now();
+    if (!force && now - lastSent < 50) return;
+    lastSent = now;
+    send({ t: "in", f: +input.f.toFixed(2), s: +input.s.toFixed(2), yaw: +me.yaw.toFixed(1), pitch: +me.pitch.toFixed(1), run: me.run, sneak: me.sneak, jump: jumpSent, pos: [+me.x.toFixed(3), +me.y.toFixed(3), +me.z.toFixed(3)] });
+    jumpSent = false;
+  }
+  // In the background (frames paused) keep the server informed.
+  setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);
+  const act = a => { send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12); };
+  const rightDown = () => { charge = performance.now(); act("rdown"); };
+  const rightUp = () => { charge = -1; act("rup"); };
+
+  let stickId = null, origin = null;
+  const knob = $("knob"), stick = $("stick");
+  const setRun = on => { me.run = on; $("bRun").classList.toggle("on", on); };
+  stick.addEventListener("pointerdown", e => { stickId = e.pointerId; origin = { x: e.clientX, y: e.clientY }; knob.style.left = e.clientX + "px"; knob.style.top = e.clientY + "px"; knob.style.display = "block"; stick.setPointerCapture(e.pointerId); moveStick(e); });
+  stick.addEventListener("pointermove", e => { if (e.pointerId === stickId) moveStick(e); });
+  // Letting go of the stick stops a sprint, as releasing W does in Minecraft.
+  const endStick = e => { if (e.pointerId !== stickId) return; stickId = null; knob.style.display = "none"; knob.firstChild.style.transform = ""; input.f = 0; input.s = 0; setRun(false); sendInput(true); };
+  stick.addEventListener("pointerup", endStick); stick.addEventListener("pointercancel", endStick);
+  function moveStick(e) {
+    let dx = e.clientX - origin.x, dy = e.clientY - origin.y; const len = Math.hypot(dx, dy), max = 50;
+    if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+    knob.firstChild.style.transform = "translate(" + dx + "px," + dy + "px)";
+    input.f = len > 8 ? -dy / max : 0; input.s = len > 8 ? dx / max : 0;
+    if (input.f < 0.3) setRun(false);
+    sendInput();
+  }
+  let lookId = null, lookLast = null;
+  const look = $("look");
+  look.addEventListener("pointerdown", e => { lookId = e.pointerId; lookLast = { x: e.clientX, y: e.clientY }; look.setPointerCapture(e.pointerId); });
+  look.addEventListener("pointermove", e => { if (e.pointerId !== lookId) return; turn((e.clientX - lookLast.x) * sens, (e.clientY - lookLast.y) * sens); lookLast = { x: e.clientX, y: e.clientY }; });
+  const endLook = e => { if (e.pointerId === lookId) lookId = null; };
+  look.addEventListener("pointerup", endLook); look.addEventListener("pointercancel", endLook);
+  function turn(dx, dy) { me.yaw = ((me.yaw + dx) % 360 + 540) % 360 - 180; me.pitch = Math.max(-90, Math.min(90, me.pitch + dy)); sendInput(); }
+
+  function hold(el, down, up) {
+    el.addEventListener("pointerdown", e => { e.preventDefault(); e.stopPropagation(); try { el.setPointerCapture(e.pointerId); } catch (x) {} el.classList.add("down"); down(); });
+    const u = () => { if (!el.classList.contains("down")) return; el.classList.remove("down"); up && up(); };
+    el.addEventListener("pointerup", u); el.addEventListener("pointercancel", u); el.addEventListener("lostpointercapture", u);
+  }
+  hold($("bRight"), rightDown, rightUp);
+  hold($("bLeft"), () => act("left"));
+  hold($("bJump"), () => { input.jump = true; });
+  hold($("bSneak"), () => { me.sneak = true; sendInput(true); }, () => { me.sneak = false; sendInput(true); });
+  // DEPAR is a switch: tap on, tap off (and it turns off by itself when you stop or walk backwards).
+  hold($("bRun"), () => { setRun(!me.run); sendInput(true); });
+
+  const keys = new Set();
+  cv.addEventListener("mousedown", e => {
+    if (!playing) return;
+    if (!document.pointerLockElement) { cv.requestPointerLock && cv.requestPointerLock(); return; }
+    if (e.button === 0) act("left"); else if (e.button === 2) rightDown();
+  });
+  cv.addEventListener("mouseup", e => { if (document.pointerLockElement && e.button === 2) rightUp(); });
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+  document.addEventListener("mousemove", e => { if (document.pointerLockElement === cv) turn(e.movementX * sens * 0.5, e.movementY * sens * 0.5); });
+  addEventListener("wheel", e => { if (playing && document.pointerLockElement) send({ t: "slot", i: ((held + (e.deltaY > 0 ? 1 : -1)) % 9 + 9) % 9 }); });
+  addEventListener("keydown", e => {
+    if (!playing || $("chatBox").classList.contains("on")) return; const k = e.key.toLowerCase();
+    if (k === "f5") { e.preventDefault(); thirdPerson = !thirdPerson; return; }
+    if (k === "t" || k === "/") { e.preventDefault(); $("chatBox").classList.add("on"); $("chatInput").value = k === "/" ? "/" : ""; $("chatInput").focus(); return; }
+    if (k === "escape") { send({ t: "close" }); closeOverlay(); return; }
+    if (/^[1-9]$/.test(k)) { send({ t: "slot", i: +k - 1 }); return; }
+    if (e.repeat) return; keys.add(k);
+    if (k === " ") input.jump = true;
+    if (k === "shift") me.sneak = true;
+    if (k === "control") setRun(true);
+    keyMove();
+  });
+  addEventListener("keyup", e => { const k = e.key.toLowerCase(); keys.delete(k); if (k === "shift") me.sneak = false; keyMove(); });
+  function keyMove() {
+    if (stickId !== null) return;
+    input.f = (keys.has("w") ? 1 : 0) - (keys.has("s") ? 1 : 0);
+    input.s = (keys.has("d") ? 1 : 0) - (keys.has("a") ? 1 : 0);
+    if (input.f <= 0) setRun(false);
+    sendInput(true);
+  }
+})();
+</script>
+</body>
+</html>
