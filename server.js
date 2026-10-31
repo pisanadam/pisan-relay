@@ -279,7 +279,12 @@ class Session {
     if (!bot || !bot.entity) return;
     const camera = this.extras.cam;
     const view = camera ? new Vec3(camera[0], camera[1], camera[2]) : bot.entity.position;
-    if (!this.regionAt || this.regionAt.distanceTo(view) > 26 || (this.dirty && Date.now() - (this.regionSent || 0) > 2000)) { this.regionAt = view.clone(); this.dirty = false; this.changes = []; this.regionSent = Date.now(); this.region(view); }
+    // Watching (a goal replay's camera, spectator): the camera hangs above the pitch and looks across it, so the
+    // area sent is centred ahead of it, where it looks, and reaches further down.
+    const high = !!camera || (bot.game && bot.game.gameMode === "spectator");
+    let centre = view;
+    if (high) { const yaw = (camera ? camera[3] : fromYaw(bot.entity.yaw)) * Math.PI / 180; centre = view.offset(-Math.sin(yaw) * 22, 0, Math.cos(yaw) * 22); }
+    if (!this.regionAt || this.regionAt.distanceTo(centre) > (high ? 10 : 26) || this.regionHigh !== high || (this.dirty && Date.now() - (this.regionSent || 0) > 2000)) { this.regionAt = centre.clone(); this.regionHigh = high; this.dirty = false; this.changes = []; this.regionSent = Date.now(); this.region(centre, high); }
     else if (this.changes && this.changes.length) {
       // Single blocks that changed (dug, placed, doors): only those, with their palette entries.
       const list = this.changes.splice(0, 400).map(([x, y, z, sid]) => {
@@ -362,9 +367,10 @@ class Session {
   }
 
   /* The blocks in an 81x81x24 area around the view: a palette of block states and run-lengths. */
-  region(c) {
+  region(c, high) {
     const bot = this.bot, r = 40;
-    const bx = Math.floor(c.x), bz = Math.floor(c.z), y0 = Math.floor(c.y) - 8, y1 = y0 + 24;
+    // A replay camera hangs well above the pitch: reach further down so the ground stays in the picture.
+    const bx = Math.floor(c.x), bz = Math.floor(c.z), y0 = Math.floor(c.y) - (high ? 20 : 8), y1 = y0 + (high ? 30 : 24);
     this.box = { x0: bx - r, x1: bx + r, z0: bz - r, z1: bz + r, y0, y1 };
     const palette = [{ n: "AIR", s: [] }], index = new Map();
     const runs = []; let last = -1, count = 0;
