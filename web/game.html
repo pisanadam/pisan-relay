@@ -134,6 +134,7 @@
   <div class="tb" id="bJump">ZIPLA</div>
   <div class="tb" id="bLeft">SOL</div>
   <div class="tb" id="bRight">SAĞ</div>
+  <div id="fps" style="display:none;position:absolute;left:6px;top:4px;z-index:30;color:#fff;font:bold 13px monospace;text-shadow:1px 1px #000;pointer-events:none"></div>
   <div id="top"><div class="tb" id="bInv">E</div><div class="tb" id="bChat">T</div><div class="tb" id="bCam">F5</div><div class="tb" id="bSet">⚙</div><div class="tb" id="bFs">⛶</div><div class="tb" id="bQuit">Çık</div></div>
   <div id="chatBox"><input class="field" id="chatInput" maxlength="200" placeholder="Mesaj veya /komut" autocomplete="off"><button class="mcbtn" id="chatSend" style="width:auto">Gönder</button></div>
   <div id="overlay"><div class="panel" id="panel"></div></div>
@@ -347,13 +348,27 @@
   // ---------- scene ----------
   const cv = $("cv");
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#78a7ff");
   scene.fog = new THREE.Fog("#a9c6ff", 45, 120);
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 300);
+  /* Graphics settings (⚙), kept on this device: resolution as a share of the screen's, view distance, field of
+     view, a frame cap to save battery, and an FPS counter. */
+  const DPR = window.devicePixelRatio || 1;
+  const gfxDefault = { res: Math.round(Math.min(DPR, 1.25) / DPR * 20) * 5, view: 120, fov: 70, cap: 0, fps: false };
+  let gfx = gfxDefault;
+  try { gfx = Object.assign({}, gfxDefault, JSON.parse(store.get("pisan-gfx") || "{}")); } catch (e) { }
+  function applyGfx() {
+    renderer.setPixelRatio(Math.max(0.25, DPR * gfx.res / 100));
+    scene.fog.near = gfx.view * 0.4; scene.fog.far = gfx.view;
+    camera.fov = gfx.fov; camera.far = gfx.view + 40;
+    if (typeof resize === "function") resize(); else camera.updateProjectionMatrix();
+    $("fps").style.display = gfx.fps ? "block" : "none";
+    store.set("pisan-gfx", JSON.stringify(gfx));
+  }
   function resize() { const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
   addEventListener("resize", resize);
+  applyGfx();
   const worldGroup = new THREE.Group(); scene.add(worldGroup);
   function clearWorld() { while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); } }
 
@@ -747,6 +762,22 @@
     const p = $("panel"); p.innerHTML = "<h3>Ayarlar</h3><label style='color:#333'>Bakış hassasiyeti</label>";
     const r = document.createElement("input"); r.type = "range"; r.min = 0.05; r.max = 1; r.step = 0.05; r.value = sens; r.oninput = () => { sens = +r.value; store.set("pisan-sens", sens); $("sens").value = sens; };
     p.appendChild(r);
+    const slider = (label, key, min, max, step, fmt) => {
+      const l = document.createElement("label"); l.style.cssText = "color:#333;display:block;margin-top:8px";
+      const show = () => { l.textContent = label + ": " + fmt(gfx[key]); }; show();
+      const i = document.createElement("input"); i.type = "range"; i.min = min; i.max = max; i.step = step; i.value = gfx[key];
+      i.oninput = () => { gfx[key] = +i.value; show(); applyGfx(); };
+      p.appendChild(l); p.appendChild(i);
+    };
+    const h = document.createElement("h3"); h.textContent = "Görüntü"; h.style.marginTop = "12px"; p.appendChild(h);
+    slider("Çözünürlük", "res", 25, 100, 5, v => "%" + v + " (" + Math.round(innerWidth * DPR * v / 100) + "×" + Math.round(innerHeight * DPR * v / 100) + ")");
+    slider("Görüş mesafesi", "view", 24, 160, 8, v => v + " blok");
+    slider("Görüş açısı (FOV)", "fov", 50, 110, 5, v => v + "°");
+    slider("Kare sınırı", "cap", 0, 60, 30, v => v ? v + " FPS (pil tasarrufu)" : "Sınırsız");
+    const fl = document.createElement("label"); fl.style.cssText = "color:#333;display:block;margin-top:8px";
+    const fc = document.createElement("input"); fc.type = "checkbox"; fc.checked = gfx.fps; fc.onchange = () => { gfx.fps = fc.checked; applyGfx(); };
+    fl.appendChild(fc); fl.appendChild(document.createTextNode(" FPS göster")); p.appendChild(fl);
+    const d = document.createElement("button"); d.className = "mcbtn"; d.textContent = "Varsayılan görüntü"; d.onclick = () => { gfx = Object.assign({}, gfxDefault); applyGfx(); $("bSet").onclick(); }; p.appendChild(d);
     const c = document.createElement("button"); c.className = "mcbtn"; c.textContent = "Tamam"; c.onclick = closeOverlay; p.appendChild(c);
     $("overlay").classList.add("on");
   };
@@ -873,9 +904,14 @@
   }
 
   let lastFrame = performance.now(), lastBall = null, lastTurn = null;
+  let lastDraw = 0, fpsCount = 0, fpsAt = 0;
   function frame() {
     requestAnimationFrame(frame);
     if (!playing || !$("game").classList.contains("on")) return;
+    const t0 = performance.now();
+    if (gfx.cap && t0 - lastDraw < 1000 / gfx.cap - 3) return;
+    lastDraw = t0; fpsCount++;
+    if (t0 - fpsAt >= 1000) { if (gfx.fps) $("fps").textContent = Math.round(fpsCount * 1000 / (t0 - fpsAt)) + " FPS"; fpsCount = 0; fpsAt = t0; }
     const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
     const st = sample();
     let cam = null;
