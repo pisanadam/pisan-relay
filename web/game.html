@@ -49,9 +49,22 @@
   #title { position:absolute; top:24%; left:0; right:0; text-align:center; font-size:46px; pointer-events:none; }
   #subtitle { position:absolute; top:calc(24% + 58px); left:0; right:0; text-align:center; font-size:20px; pointer-events:none; }
   #actionbar { position:absolute; bottom:98px; left:0; right:0; text-align:center; pointer-events:none; font-size:15px; }
-  #hotbar { position:absolute; bottom:max(6px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); display:flex; z-index:3; }
-  #hotbar div { width:44px; height:44px; border:3px solid #555; background:rgba(0,0,0,.45); margin-left:-3px; display:grid; place-items:center; position:relative; }
-  #hotbar div.cur { border-color:#fff; z-index:1; }
+  #hotbar { position:absolute; bottom:max(4px, env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); z-index:3; }
+  #hotbar canvas.hbbg { position:absolute; image-rendering:pixelated; }
+  #hotbar .hslot { position:absolute; }
+  #gui { position:relative; display:none; }
+  #gui canvas.guibg { position:absolute; inset:0; width:100%; height:100%; image-rendering:pixelated; }
+  #gui .guimodel { position:absolute; image-rendering:pixelated; }
+  #gui .guitext { position:absolute; font-size:calc(var(--s) * 8); line-height:1; color:#404040; text-shadow:none; white-space:nowrap; pointer-events:none; }
+  .gslot, .hslot { position:absolute; }
+  .gslot canvas, .hslot canvas { display:block; image-rendering:pixelated; }
+  .gslot.hover::after { content:""; position:absolute; inset:0; background:rgba(255,255,255,.5); }
+  .gslot .count, .hslot .count { position:absolute; right:-2%; bottom:-6%; color:#fff; text-shadow:0.12em 0.12em 0 #3f3f3f; font-size:60%; line-height:1; }
+  .gslot { font-size:calc(var(--s) * 13); }
+  .hslot { font-size:26px; }
+  #tip { position:fixed; display:none; z-index:8; pointer-events:none; padding:4px 6px; background:rgba(16,0,16,.94); border:2px solid; border-image:linear-gradient(#5000ff, #28007f) 1; color:#fff; font-size:14px; line-height:1.35; text-shadow:2px 2px 0 #3f3f3f; max-width:60vw; }
+  #carried { position:fixed; display:none; z-index:7; pointer-events:none; }
+  #carried .gslot { position:relative; }
   .icon { width:30px; height:30px; image-rendering:pixelated; }
   .glow { filter:drop-shadow(0 0 3px #c58cff) drop-shadow(0 0 2px #c58cff); }
   .count { position:absolute; right:2px; bottom:0; font-size:12px; }
@@ -70,7 +83,7 @@
   #bJump { right:max(14px, env(safe-area-inset-right)); bottom:216px; width:64px; height:64px; }
   #bSneak { right:110px; bottom:228px; width:58px; height:58px; }
   #bRun { left:14px; bottom:max(18px, env(safe-area-inset-bottom)); width:70px; height:42px; }
-  #top { position:absolute; top:max(6px, env(safe-area-inset-top)); right:8px; display:flex; gap:6px; z-index:3; }
+  #top { position:absolute; top:max(6px, env(safe-area-inset-top)); right:8px; display:flex; gap:6px; z-index:6; }
   #top .tb { position:static; width:auto; height:auto; padding:6px 9px; }
   #overlay { position:absolute; inset:0; display:none; place-items:center; background:rgba(0,0,0,.55); z-index:5; }
   #overlay.on { display:grid; }
@@ -137,7 +150,8 @@
   <div id="fps" style="display:none;position:absolute;left:6px;top:4px;z-index:30;color:#fff;font:bold 13px monospace;text-shadow:1px 1px #000;pointer-events:none"></div>
   <div id="top"><div class="tb" id="bInv">E</div><div class="tb" id="bChat">T</div><div class="tb" id="bCam">F5</div><div class="tb" id="bSet">⚙</div><div class="tb" id="bFs">⛶</div><div class="tb" id="bQuit">Çık</div></div>
   <div id="chatBox"><input class="field" id="chatInput" maxlength="200" placeholder="Mesaj veya /komut" autocomplete="off"><button class="mcbtn" id="chatSend" style="width:auto">Gönder</button></div>
-  <div id="overlay"><div class="panel" id="panel"></div></div>
+  <div id="overlay"><div class="panel" id="panel"></div><div id="gui"></div></div>
+  <div id="tip"></div><div id="carried"></div>
 </section>
 <script>
 (() => {
@@ -217,13 +231,14 @@
       const map = new Map();
       const jobs = [];
       zip.forEach((path, entry) => {
-        const m = path.match(/^assets\/minecraft\/textures\/block\/([a-z0-9_]+)\.png$/);
-        if (m) jobs.push(entry.async("blob").then(b => map.set(m[1], new Blob([b], { type: "image/png" }))));
+        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui)\/([a-z0-9_\/]+)\.png$/);
+        if (m && (m[1] !== "block" || !m[2].includes("/"))) jobs.push(entry.async("blob").then(b => map.set(m[1] === "block" ? m[2] : m[1] + "/" + m[2], new Blob([b], { type: "image/png" }))));
       });
       await Promise.all(jobs);
-      if (!map.size) throw new Error("Pakette blok dokusu yok");
+      const blocks = [...map.keys()].filter(k => !k.includes("/")).length;
+      if (!map.size) throw new Error("Pakette doku yok");
       userPack = map; resetTextures();
-      document.querySelectorAll(".packName").forEach(e => e.textContent = "Kendi paketin: " + (file.name || "kayıtlı paket") + " (" + map.size + " doku)");
+      document.querySelectorAll(".packName").forEach(e => e.textContent = "Kendi paketin: " + (file.name || "kayıtlı paket") + " (" + blocks + " blok, " + (map.size - blocks) + " eşya/menü dokusu)");
       if (save) idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").put(file, "pack"); } catch (e) {} });
     } catch (err) {
       document.querySelectorAll(".packName").forEach(e => e.textContent = "Paket okunamadı: " + err.message);
@@ -292,6 +307,13 @@
   const TINT = { grass_block_top: [145, 189, 89], grass_block_side_overlay: [145, 189, 89], grass: [145, 189, 89], short_grass: [145, 189, 89], tall_grass_top: [145, 189, 89], tall_grass_bottom: [145, 189, 89], fern: [145, 189, 89], large_fern_top: [145, 189, 89], vine: [119, 171, 47], lily_pad: [32, 128, 48], sugar_cane: [145, 189, 89], water_still: [63, 118, 228], birch_leaves: [128, 167, 85], spruce_leaves: [97, 153, 97] };
   const tintOf = file => TINT[file] || (file.endsWith("_leaves") && !file.startsWith("azalea") && !file.startsWith("flowering") && !file.startsWith("cherry") ? [119, 171, 47] : null);
   async function realTexture(name, face, tx, ty) {
+    const c = await faceCanvas(name, face);
+    if (!c) return;
+    ac.clearRect(tx, ty, T, T); ac.drawImage(c, tx, ty);
+    atlasTex.needsUpdate = true;
+  }
+  /* One face of a block as a 16×16 canvas (tinted grass and leaves), or null when no texture has it. */
+  async function faceCanvas(name, face) {
     for (const file of candidates(name, face)) {
       const img = await loadImg(file);
       if (!img) continue;
@@ -310,12 +332,12 @@
           for (let i = 0; i < od.length; i += 4) if (od[i + 3] > 128) for (let k = 0; k < 3; k++) data.data[i + k] = od[i + k] * TINT.grass_block_side_overlay[k] / 255;
         }
       }
-      ac.clearRect(tx, ty, T, T); ac.putImageData(data, tx, ty);
-      atlasTex.needsUpdate = true;
-      return;
+      g.putImageData(data, 0, 0);
+      return c;
     }
+    return null;
   }
-  function resetTextures() { tiles.clear(); nextTile = 0; imgCache.clear(); ac.clearRect(0, 0, atlas.width, atlas.height); }
+  function resetTextures() { tiles.clear(); nextTile = 0; imgCache.clear(); iconCache.clear(); ac.clearRect(0, 0, atlas.width, atlas.height); if (lastHotbar) hotbar(lastHotbar); }
 
   function tile(name, face) {
     const key = name + "|" + face;
@@ -683,32 +705,258 @@
 
   // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
   const ITEM_ALIAS = { compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
-  function iconFor(item) {
-    const img = document.createElement("img"); img.className = "icon" + (item.glow ? " glow" : ""); img.draggable = false;
+  /* Item icons as Minecraft draws them: flat items from the item textures, blocks as little 3D cubes. */
+  const iconCache = new Map();
+  const FLAT_BLOCK = n => PLANT(n) || /TORCH|RAIL|LADDER|_PANE$|IRON_BARS|_DOOR$|LEVER|TRIPWIRE|REDSTONE_WIRE|_SIGN$|_BANNER$|LANTERN$|CHAIN$|_CANDLE$|^CANDLE$|SCAFFOLDING|_BUTTON$|_CARPET$|_PRESSURE_PLATE$|^COBWEB$|POINTED_DRIPSTONE|AMETHYST_BUD|AMETHYST_CLUSTER|HOPPER$|CAULDRON$|BELL$|_HEAD$|_SKULL$/.test(n);
+  function iconArt(m) {
+    if (iconCache.has(m)) return iconCache.get(m);
+    const pr = (async () => {
+      const name = ITEM_ALIAS[m] || m;
+      const c = document.createElement("canvas"); const g = c.getContext("2d");
+      const flat = await loadImg("item/" + name);
+      if (flat) { c.width = c.height = 16; g.imageSmoothingEnabled = false; g.drawImage(flat, 0, 0, flat.width, flat.width, 0, 0, 16, 16); return c; }
+      const N = m.toUpperCase();
+      const side = await faceCanvas(N, "side");
+      if (!side) return null;
+      if (FLAT_BLOCK(N)) { c.width = c.height = 16; g.drawImage(side, 0, 0); return c; }
+      const top = (await faceCanvas(N, "top")) || side;
+      // Isometric cube, lit from the top, left face a bit darker, right face darker still.
+      c.width = c.height = 64; g.imageSmoothingEnabled = false;
+      const k = 30 / 16, j = 15 / 16;
+      const face = (img, a, b, cc, d, e, f, shade) => {
+        g.setTransform(a, b, cc, d, e, f); g.drawImage(img, 0, 0);
+        if (shade) { g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(0,0,0," + shade + ")"; g.fillRect(0, 0, 16, 16); g.globalCompositeOperation = "source-over"; }
+      };
+      face(top, k, j, -k, j, 32, 2, 0);
+      face(side, k, j, 0, k, 2, 17, 0.2);
+      face(side, k, -j, 0, k, 32, 32, 0.4);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      return c;
+    })();
+    iconCache.set(m, pr); return pr;
+  }
+  function iconFor(item, px) {
+    const size = px || 30;
+    const c = document.createElement("canvas"); c.className = "icon" + (item.glow ? " glow" : "");
+    c.width = c.height = 64; c.style.width = c.style.height = size + "px";
+    const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
     if (item.m === "player_head") {
-      const c = document.createElement("canvas"); c.width = c.height = 8; c.className = img.className;
-      const g = c.getContext("2d"); g.fillStyle = "#c58c69"; g.fillRect(0, 0, 8, 8);
-      if (item.skin) { const s = new Image(); s.onload = () => { g.drawImage(s, 8, 8, 8, 8, 0, 0, 8, 8); g.drawImage(s, 40, 8, 8, 8, 0, 0, 8, 8); }; s.src = "/skin/" + encodeURIComponent(item.skin); }
+      g.fillStyle = "#c58c69"; g.fillRect(8, 8, 48, 48);
+      if (item.skin) { const s = new Image(); s.onload = () => { g.drawImage(s, 8, 8, 8, 8, 8, 8, 48, 48); g.drawImage(s, 40, 8, 8, 8, 6, 6, 52, 52); }; s.src = "/skin/" + encodeURIComponent(item.skin); }
       return c;
     }
-    const name = ITEM_ALIAS[item.m] || item.m;
-    const tries = [userPackUrl("item/" + name), "/tex/item/" + name + ".png", userPackUrl(name), "/tex/" + name + ".png", "/tex/" + name + "_side.png", "/tex/" + name + "_top.png"].filter(Boolean);
-    let k = 0;
-    img.onerror = () => { if (++k < tries.length) img.src = tries[k]; else img.replaceWith(Object.assign(document.createElement("span"), { textContent: "▪", style: "font-size:22px" })); };
-    img.src = tries[0];
-    return img;
+    iconArt(item.m).then(art => {
+      if (art) g.drawImage(art, 0, 0, art.width, art.height, 0, 0, 64, 64);
+      else { g.fillStyle = "#d040d0"; g.fillRect(8, 8, 24, 24); g.fillRect(32, 32, 24, 24); g.fillStyle = "#000"; g.fillRect(32, 8, 24, 24); g.fillRect(8, 32, 24, 24); }
+    });
+    return c;
   }
   function userPackUrl(file) { const b = userPack && userPack.get(file); return b ? URL.createObjectURL(b) : null; }
-  function slotEl(item) {
+  function slotEl(item, px) {
     const d = document.createElement("div");
-    if (item && item.m) { d.appendChild(iconFor(item)); if (item.n) d.appendChild(Object.assign(document.createElement("span"), { className: "count", textContent: item.n })); }
+    if (item && item.m) { d.appendChild(iconFor(item, px)); if (item.n) d.appendChild(Object.assign(document.createElement("span"), { className: "count", textContent: item.n })); }
     return d;
   }
-  let held = 0;
+
+  /* GUI pieces drawn in Minecraft's own style (the pack's gui textures replace them when a pack has them). */
+  function guiPanel(w, h) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d");
+    const px = (x, y, ww, hh, col) => { g.fillStyle = col; g.fillRect(x, y, ww, hh); };
+    px(2, 0, w - 4, 1, "#000"); px(2, h - 1, w - 4, 1, "#000"); px(0, 2, 1, h - 4, "#000"); px(w - 1, 2, 1, h - 4, "#000");
+    px(1, 1, 1, 1, "#000"); px(w - 2, 1, 1, 1, "#000"); px(1, h - 2, 1, 1, "#000"); px(w - 2, h - 2, 1, 1, "#000");
+    px(1, 2, w - 2, h - 4, "#c6c6c6"); px(2, 1, w - 4, h - 2, "#c6c6c6");
+    px(2, 1, w - 5, 2, "#fff"); px(1, 2, 2, h - 5, "#fff"); px(3, 3, 1, 1, "#fff");
+    px(4, h - 3, w - 5, 2, "#555"); px(w - 3, 4, 2, h - 6, "#555"); px(w - 4, h - 4, 1, 1, "#555");
+    return { c, g };
+  }
+  function guiSlot(g, x, y, big) {
+    const s = big ? 26 : 18, o = big ? 5 : 1;
+    g.fillStyle = "#373737"; g.fillRect(x - o, y - o, s - 1, s - 1);
+    g.fillStyle = "#fff"; g.fillRect(x - o + 1, y - o + 1, s - 1, s - 1);
+    g.fillStyle = "#8b8b8b"; g.fillRect(x - o + 1, y - o + 1, s - 2, s - 2);
+  }
+  function guiArrow(g, x, y) {
+    g.fillStyle = "#8b8b8b"; g.fillRect(x, y + 6, 16, 4);
+    for (let i = 0; i < 8; i++) g.fillRect(x + 15 + i, y + i, 1, 16 - 2 * i);
+  }
+  function guiFlame(g, x, y) {
+    g.fillStyle = "#8b8b8b";
+    [[6, 0, 2], [5, 2, 4], [4, 4, 6], [3, 6, 8], [2, 8, 10], [2, 10, 10], [3, 12, 8]].forEach(([a, b, w]) => g.fillRect(x + a, y + b, w, 2));
+  }
+  async function packGui(file) { const img = userPack && userPack.get("gui/" + file) ? await loadImg("gui/" + file) : null; return img; }
+
+  /* Where things go in each kind of window, in Minecraft's GUI pixels (176 wide). */
+  function layoutFor(o) {
+    const type = o.inv ? "inventory" : (o.type || "");
+    const n = o.items.length;
+    const L = { w: 176, h: 166, slots: [], invY: 84, labels: [], draw: [], tex: null };
+    const at = (i, x, y, big) => L.slots.push({ i, x, y, big });
+    let m;
+    if (type === "inventory") {
+      L.tex = { file: "container/inventory", h: 166 };
+      [5, 6, 7, 8].forEach((s, k) => at({ armor: k }, 8, 8 + k * 18));
+      at({ armor: 4 }, 77, 62);
+      [1, 2, 3, 4].forEach((s, k) => at({ craft: s }, 98 + (k % 2) * 18, 18 + Math.floor(k / 2) * 18));
+      at({ craft: 0 }, 154, 28);
+      L.labels.push({ t: "Üretim", x: 97, y: 8 });
+      L.draw.push(g => { guiArrow(g, 134, 28); g.fillStyle = "#000"; g.fillRect(26, 8, 49, 70); });
+      L.model = { x: 26, y: 8, w: 49, h: 70 };
+    } else if (type === "furnace" || type === "smoker" || type === "blast_furnace") {
+      L.tex = { file: "container/" + type, h: 166 };
+      at(0, 56, 17); at(1, 56, 53); at(2, 116, 35, true);
+      L.draw.push(g => { guiArrow(g, 79, 34); guiFlame(g, 56, 36); });
+    } else if (type === "crafting") {
+      L.tex = { file: "container/crafting_table", h: 166 };
+      at(0, 124, 35, true);
+      for (let k = 0; k < 9; k++) at(k + 1, 30 + (k % 3) * 18, 17 + Math.floor(k / 3) * 18);
+      L.draw.push(g => guiArrow(g, 90, 35));
+    } else if (type === "hopper") {
+      L.tex = { file: "container/hopper", h: 133 }; L.h = 133; L.invY = 51;
+      for (let k = 0; k < 5; k++) at(k, 44 + k * 18, 20);
+    } else if (type === "generic_3x3" || (n === 9 && /dispenser|dropper/.test(type))) {
+      L.tex = { file: "container/dispenser", h: 166 };
+      for (let k = 0; k < 9; k++) at(k, 62 + (k % 3) * 18, 17 + Math.floor(k / 3) * 18);
+    } else {
+      const rows = (m = type.match(/generic_9x(\d)/)) ? +m[1] : Math.max(1, Math.ceil(n / 9));
+      L.h = 114 + rows * 18; L.invY = rows * 18 + 31;
+      L.tex = { file: "container/generic_54", rows };
+      for (let k = 0; k < n; k++) at(k, 8 + (k % 9) * 18, 18 + Math.floor(k / 9) * 18);
+    }
+    if (type !== "inventory") L.labels.push({ t: o.title || "", x: 8, y: 6, title: true });
+    if (type !== "inventory") L.labels.push({ t: "Envanter", x: 8, y: L.invY - 11 });
+    const own = o.own || [];
+    own.forEach((item, k) => at({ own: k }, 8 + (k % 9) * 18, k < 27 ? L.invY + Math.floor(k / 9) * 18 : L.invY + 58));
+    return L;
+  }
+
+  let menuOpen = null, carried = null, lastPointer = { x: 0, y: 0 };
+  function openMenu(o) {
+    menuOpen = o;
+    const L = layoutFor(o);
+    const gui = $("gui"); gui.innerHTML = ""; gui.style.display = "block"; $("panel").style.display = "none";
+    const S = Math.max(1, Math.floor(Math.min(innerWidth * 0.98 / L.w, innerHeight * 0.96 / L.h) * 2) / 2);
+    gui.style.width = L.w * S + "px"; gui.style.height = L.h * S + "px"; gui.style.setProperty("--s", S + "px");
+    // Background: the pack's own texture when it has one, otherwise drawn here.
+    const { c, g } = guiPanel(L.w, L.h);
+    c.className = "guibg"; gui.appendChild(c);
+    L.slots.forEach(sl => guiSlot(g, sl.x, sl.y, sl.big));
+    L.draw.forEach(f => f(g));
+    (async () => {
+      const img = await packGui(L.tex.file);
+      if (!img || menuOpen !== o) return;
+      const k = img.width / 256;
+      g.clearRect(0, 0, L.w, L.h); g.imageSmoothingEnabled = false;
+      if (L.tex.rows) {
+        const top = L.tex.rows * 18 + 17;
+        g.drawImage(img, 0, 0, 176 * k, top * k, 0, 0, 176, top);
+        g.drawImage(img, 0, 126 * k, 176 * k, 96 * k, 0, top, 176, 96);
+      } else g.drawImage(img, 0, 0, 176 * k, L.h * k, 0, 0, 176, L.h);
+      if (L.model) { g.fillStyle = "#000"; g.fillRect(L.model.x, L.model.y, L.model.w, L.model.h); }
+    })();
+    if (L.model) gui.appendChild(playerModel(o.skin, L.model, S));
+    for (const lb of L.labels) {
+      const t = document.createElement("div"); t.className = "guitext";
+      if (lb.title) t.innerHTML = legacy(lb.t, "#404040"); else t.textContent = lb.t;
+      t.style.left = lb.x * S + "px"; t.style.top = (lb.y - 1) * S + "px"; gui.appendChild(t);
+    }
+    const itemOf = i => typeof i === "number" ? o.items[i] : i.own !== undefined ? o.own[i.own] : i.armor !== undefined ? (o.armor || [])[i.armor] : (o.craft || [])[i.craft];
+    const slotNo = i => typeof i === "number" ? i : i.own !== undefined ? o.ownStart + i.own : i.armor !== undefined ? [5, 6, 7, 8, 45][i.armor] : i.craft;
+    for (const sl of L.slots) {
+      const item = itemOf(sl.i) || {};
+      const d = slotEl(item, 16 * S); d.className = "gslot";
+      d.style.left = sl.x * S + "px"; d.style.top = sl.y * S + "px"; d.style.width = d.style.height = 16 * S + "px";
+      const slot = slotNo(sl.i);
+      let pressTimer = 0, long = false;
+      d.onpointerdown = e => {
+        e.preventDefault(); e.stopPropagation(); long = false; lastPointer = { x: e.clientX, y: e.clientY };
+        d.classList.add("hover"); tooltip(item, d);
+        pressTimer = setTimeout(() => { long = true; send({ t: "click", slot, right: true, inv: !!o.inv }); }, 450);
+      };
+      d.onpointerup = e => { e.stopPropagation(); clearTimeout(pressTimer); d.classList.remove("hover"); if (!long) send({ t: "click", slot, right: false, inv: !!o.inv }); };
+      d.onpointerleave = () => { clearTimeout(pressTimer); d.classList.remove("hover"); };
+      gui.appendChild(d);
+    }
+    // The item on the pointer, as in Minecraft, sits where you last tapped.
+    carried = o.cursor && o.cursor.m ? o.cursor : null;
+    const cur = $("carried"); cur.innerHTML = "";
+    if (carried) { const el = slotEl(carried, 16 * S); el.className = "gslot"; cur.appendChild(el); cur.style.left = lastPointer.x - 8 * S + "px"; cur.style.top = lastPointer.y - 8 * S + "px"; cur.style.display = "block"; }
+    else cur.style.display = "none";
+    $("overlay").classList.add("on");
+  }
+  /* Minecraft's purple-edged tooltip with the name and lore, beside the slot you touch. */
+  function tooltip(item, near) {
+    const tip = $("tip");
+    if (!item || !item.m) { tip.style.display = "none"; return; }
+    const pretty = item.m.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+    tip.innerHTML = legacy(item.name || pretty, "#ffffff") + (item.lore ? "<br>" + item.lore.map(l => legacy(l, "#aa00aa")).join("<br>") : "");
+    tip.style.display = "block";
+    const r = near.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = r.right + 8, y = r.top - 12;
+    if (x + tw > innerWidth - 4) x = r.left - tw - 8;
+    tip.style.left = Math.max(4, x) + "px"; tip.style.top = Math.max(4, Math.min(innerHeight - th - 4, y)) + "px";
+    clearTimeout(tooltip.t); tooltip.t = setTimeout(() => tip.style.display = "none", 2500);
+  }
+  /* The player as the inventory shows them: the skin's front, standing, in the black box. */
+  function playerModel(skin, box, S) {
+    const c = document.createElement("canvas"); c.width = 16; c.height = 32; c.className = "guimodel";
+    const h = box.h - 6, w = h / 2;
+    c.style.width = w * S + "px"; c.style.height = h * S + "px";
+    c.style.left = (box.x + (box.w - w) / 2) * S + "px"; c.style.top = (box.y + 3) * S + "px";
+    const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+    const img = new Image();
+    img.onload = () => {
+      const slim = false, part = (sx, sy, sw, sh, dx, dy) => g.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      part(8, 8, 8, 8, 4, 0); part(20, 20, 8, 12, 4, 8); part(44, 20, 4, 12, 0, 8); part(4, 20, 4, 12, 4, 20);
+      if (img.height >= 64) { part(36, 52, 4, 12, 12, 8); part(20, 52, 4, 12, 8, 20); part(40, 8, 8, 8, 4, 0); part(20, 36, 8, 12, 4, 8); }
+      else { g.save(); g.scale(-1, 1); g.drawImage(img, 44, 20, 4, 12, -16, 8, 4, 12); g.drawImage(img, 4, 20, 4, 12, -12, 20, 4, 12); g.restore(); part(40, 8, 8, 8, 4, 0); }
+    };
+    // No skin to show (an unknown name): a plain figure in the same shape.
+    img.onerror = () => {
+      const f = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+      f(4, 0, 8, 8, "#b4835e"); f(4, 0, 8, 2, "#3b2a1a"); f(5, 4, 2, 1, "#fff"); f(9, 4, 2, 1, "#fff"); f(6, 4, 1, 1, "#4a3ba0"); f(9, 4, 1, 1, "#4a3ba0");
+      f(4, 8, 8, 12, "#2fa3a8"); f(0, 8, 4, 12, "#2fa3a8"); f(12, 8, 4, 12, "#2fa3a8"); f(0, 17, 4, 3, "#b4835e"); f(12, 17, 4, 3, "#b4835e");
+      f(4, 20, 8, 12, "#3b3f9a"); f(4, 29, 8, 3, "#555"); f(7, 20, 1, 9, "#2c2f78");
+    };
+    img.src = "/skin/" + encodeURIComponent(skin || myName.replace(/^\(mobil\)/, "") || "x");
+    return c;
+  }
+  function closeMenu() { send({ t: "close" }); closeOverlay(); }
+
+  let held = 0, lastHotbar = null;
+  /* The hotbar as in Minecraft: nine slots in a grey strip, the chosen one framed. */
   function hotbar(o) {
+    lastHotbar = o;
     const bar = $("hotbar"); bar.innerHTML = ""; held = o.held;
+    const S = Math.max(1.5, Math.min(2.5, innerWidth * 0.48 / 182));
+    bar.style.width = 182 * S + "px"; bar.style.height = 22 * S + "px";
+    const c = document.createElement("canvas"); c.width = 184; c.height = 24; c.className = "hbbg";
+    c.style.width = 184 * S + "px"; c.style.height = 24 * S + "px"; c.style.left = c.style.top = -S + "px";
+    const g = c.getContext("2d");
+    const drawPlain = () => {
+      g.clearRect(0, 0, 184, 24);
+      g.fillStyle = "rgba(0,0,0,.55)"; g.fillRect(1, 1, 182, 22);
+      for (let i = 0; i < 9; i++) {
+        const x = 1 + i * 20;
+        g.fillStyle = "rgba(139,139,139,.9)"; g.fillRect(x + 1, 2, 20, 2); g.fillRect(x + 1, 20, 20, 2); g.fillRect(x + 1, 2, 2, 20); g.fillRect(x + 19, 2, 2, 20);
+        g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x + 3, 4, 16, 16);
+      }
+      const x = o.held * 20;
+      g.fillStyle = "#000"; g.fillRect(x, 0, 24, 24);
+      g.fillStyle = "#fff"; g.fillRect(x + 1, 1, 22, 22);
+      g.fillStyle = "#a0a0a0"; g.fillRect(x + 2, 2, 20, 20);
+      g.clearRect(x + 3, 3, 18, 18); g.fillStyle = "rgba(0,0,0,.35)"; g.fillRect(x + 3, 3, 18, 18);
+    };
+    drawPlain();
+    packGui("widgets").then(img => {
+      if (!img || lastHotbar !== o) return;
+      const k = img.width / 256; g.clearRect(0, 0, 184, 24); g.imageSmoothingEnabled = false;
+      g.drawImage(img, 0, 0, 182 * k, 22 * k, 1, 1, 182, 22);
+      g.drawImage(img, 0, 22 * k, 24 * k, 24 * k, o.held * 20, 0, 24, 24);
+    });
+    bar.appendChild(c);
     o.items.forEach((item, i) => {
-      const d = slotEl(item); if (i === o.held) d.className = "cur";
+      const d = slotEl(item, 16 * S); d.className = "hslot";
+      d.style.left = (i * 20 + 3) * S + "px"; d.style.top = 3 * S + "px"; d.style.width = d.style.height = 16 * S + "px";
       d.onpointerdown = e => { e.stopPropagation(); send({ t: "slot", i }); if (item && item.name) showInfo(item); };
       bar.appendChild(d);
     });
@@ -717,45 +965,7 @@
   function showInfo(item) {
     $("actionbar").innerHTML = legacy(item.name || item.m); clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 2000);
   }
-
-  // ---------- menus (chest-style inventories the server opens) ----------
-  function openMenu(o) {
-    const p = $("panel"); p.innerHTML = "";
-    const h = document.createElement("h3"); h.innerHTML = legacy(o.title, "#404040"); p.appendChild(h);
-    const grid = document.createElement("div"); grid.className = "grid";
-    const slotOf = (item, slot) => {
-      const d = slotEl(item); d.className = "slot";
-      let pressTimer = 0, long = false;
-      d.onpointerdown = e => { e.preventDefault(); long = false; pressTimer = setTimeout(() => { long = true; info(item); send({ t: "click", slot, right: true, inv: !!o.inv }); }, 550); info(item); };
-      d.onpointerup = () => { clearTimeout(pressTimer); if (!long) send({ t: "click", slot, right: false, inv: !!o.inv }); };
-      d.onpointerleave = () => clearTimeout(pressTimer);
-      return d;
-    };
-    if (o.own && o.own.length) {
-      // The player's own inventory under the container (main rows, then the hotbar).
-      setTimeout(() => {
-        const sep = document.createElement("div"); sep.style.height = "8px"; p.insertBefore(sep, infoEl);
-        const ownGrid = document.createElement("div"); ownGrid.className = "grid";
-        o.own.forEach((item, i) => ownGrid.appendChild(slotOf(item, o.ownStart + i)));
-        p.insertBefore(ownGrid, infoEl);
-      }, 0);
-    }
-    o.items.forEach((item, slot) => {
-      const d = slotEl(item); d.className = "slot";
-      let pressTimer = 0, long = false;
-      d.onpointerdown = e => { e.preventDefault(); long = false; pressTimer = setTimeout(() => { long = true; info(item); send({ t: "click", slot, right: true }); }, 550); info(item); };
-      d.onpointerup = () => { clearTimeout(pressTimer); if (!long) send({ t: "click", slot, right: false }); };
-      d.onpointerleave = () => clearTimeout(pressTimer);
-      grid.appendChild(d);
-    });
-    if (o.items.length) p.appendChild(grid);
-    const infoEl = document.createElement("div"); infoEl.id = "menuInfo"; p.appendChild(infoEl);
-    const close = document.createElement("button"); close.className = "mcbtn"; close.textContent = "Kapat"; close.onclick = () => { send({ t: "close" }); closeOverlay(); };
-    p.appendChild(close);
-    $("overlay").classList.add("on");
-    function info(item) { infoEl.innerHTML = item && item.m ? legacy(item.name || item.m, "#ffffff").replace(/color:#ffffff/g, "color:#202020") + (item.lore ? "<br>" + item.lore.map(l => legacy(l, "#555555")).join("<br>") : "") : ""; }
-  }
-  function closeOverlay() { $("overlay").classList.remove("on"); }
+  function closeOverlay() { $("overlay").classList.remove("on"); $("gui").style.display = "none"; $("panel").style.display = ""; $("tip").style.display = "none"; $("carried").style.display = "none"; menuOpen = null; }
 
   // ---------- settings ----------
   $("bSet").onclick = () => {
@@ -781,7 +991,9 @@
     const c = document.createElement("button"); c.className = "mcbtn"; c.textContent = "Tamam"; c.onclick = closeOverlay; p.appendChild(c);
     $("overlay").classList.add("on");
   };
-  $("bInv").onclick = () => send({ t: "inv" });
+  $("bInv").onclick = () => { if ($("overlay").classList.contains("on")) closeMenu(); else send({ t: "inv" }); };
+  // Touching outside a menu closes it, as Esc / E do in Minecraft.
+  $("overlay").addEventListener("pointerdown", e => { if (e.target === $("overlay") && menuOpen) closeMenu(); });
   $("bChat").onclick = () => { $("chatBox").classList.toggle("on"); if ($("chatBox").classList.contains("on")) $("chatInput").focus(); };
   const sendChat = () => { const t = $("chatInput").value.trim(); if (t) send({ t: "chat", text: t }); $("chatInput").value = ""; $("chatBox").classList.remove("on"); };
   $("chatSend").onclick = sendChat;

@@ -176,7 +176,11 @@ class Session {
     bot.on("actionBar", msg => this.send({ t: "text", kind: "actionbar", json: JSON.stringify(msg.json) }));
     bot._client.on("set_title_text", p => this.send({ t: "text", kind: "title", json: typeof p.text === "string" ? p.text : JSON.stringify(p.text) }));
     bot._client.on("set_title_subtitle", p => this.send({ t: "text", kind: "subtitle", json: typeof p.text === "string" ? p.text : JSON.stringify(p.text) }));
-    bot.on("windowOpen", w => this.menu(w));
+    bot.on("windowOpen", w => {
+      this.menu(w);
+      // The server changes what is in an open menu (live counters, pages): show it as it changes.
+      w.on("updateSlot", () => { clearTimeout(this.menuTimer); this.menuTimer = setTimeout(() => { if (this.bot && this.bot.currentWindow === w) this.menu(w); }, 60); });
+    });
     bot.on("windowClose", () => this.send({ t: "menuclose" }));
     bot.on("death", () => this.send({ t: "text", kind: "title", json: JSON.stringify({ text: "Öldün!", color: "red" }) }));
     bot.on("kicked", reason => { this.lastKick = plainText(reason); log("Atıldı:", this.name, this.lastKick); });
@@ -342,7 +346,8 @@ class Session {
     // The player's own inventory under the container, as in Minecraft (slot numbers are the window's).
     const own = [];
     for (let i = size; i < w.slots.length; i++) own.push(itemJson(w.slots[i]));
-    this.send({ t: "menu", title: plainText(w.title), size, items, own, ownStart: size });
+    // The window's kind (chest rows, furnace, hopper…) lays it out as Minecraft does; "cursor" is the item held on the pointer.
+    this.send({ t: "menu", title: plainText(w.title), type: String(w.type || "").replace("minecraft:", ""), size, items, own, ownStart: size, cursor: itemJson(w.selectedItem) });
   }
 
   inventory() {
@@ -350,7 +355,8 @@ class Session {
     const own = [];
     for (let i = 9; i < 45; i++) own.push(itemJson(bot.inventory.slots[i]));
     const armor = [5, 6, 7, 8, 45].map(i => itemJson(bot.inventory.slots[i]));
-    this.send({ t: "menu", title: "Envanter", size: 0, items: [], own, ownStart: 9, inv: true, armor });
+    const craft = [0, 1, 2, 3, 4].map(i => itemJson(bot.inventory.slots[i]));
+    this.send({ t: "menu", title: "Envanter", type: "inventory", size: 0, items: [], own, ownStart: 9, inv: true, armor, craft, cursor: itemJson(bot.inventory.selectedItem), skin: this.skin || (this.home ? "" : this.name) });
   }
 
   /* Block shapes by state (stairs, slabs, fences…), worked out once per state. */
