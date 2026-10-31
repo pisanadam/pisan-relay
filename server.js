@@ -55,6 +55,44 @@ async function skinPng(name) {
   skins.set(k, png);
   return png;
 }
+/* pack.zip may be a whole Minecraft client .jar (23 MB): players get only what the game draws (block, item and
+   GUI textures), copied entry by entry, still compressed, into pack-web.zip. */
+function slimPack() {
+  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web.zip");
+  let st; try { st = fs.statSync(src); } catch (e) { return null; }
+  try { if (fs.statSync(out).mtimeMs >= st.mtimeMs) return out; } catch (e) { }
+  try {
+    const b = fs.readFileSync(src);
+    let eocd = -1;
+    for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) if (b.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error("zip değil");
+    const count = b.readUInt16LE(eocd + 10);
+    let p = b.readUInt32LE(eocd + 16);
+    const locals = [], centrals = [];
+    let offset = 0;
+    for (let k = 0; k < count; k++) {
+      if (b.readUInt32LE(p) !== 0x02014b50) throw new Error("bozuk zip");
+      const nameLen = b.readUInt16LE(p + 28), extraLen = b.readUInt16LE(p + 30), commentLen = b.readUInt16LE(p + 32);
+      const name = b.toString("utf8", p + 46, p + 46 + nameLen);
+      const lo = b.readUInt32LE(p + 42), csize = b.readUInt32LE(p + 20);
+      const central = b.subarray(p, p + 46 + nameLen + extraLen + commentLen);
+      p += 46 + nameLen + extraLen + commentLen;
+      if (!/^assets\/minecraft\/textures\/(block|item|gui)\/[a-z0-9_\/]+\.png$/.test(name)) continue;
+      const lNameLen = b.readUInt16LE(lo + 26), lExtraLen = b.readUInt16LE(lo + 28);
+      const local = Buffer.from(b.subarray(lo, lo + 30 + lNameLen + lExtraLen + csize));
+      local.writeUInt16LE(local.readUInt16LE(6) & ~8, 6); // sizes are in the header; no data descriptor follows
+      const c = Buffer.from(central); c.writeUInt32LE(offset, 42); c.writeUInt16LE(c.readUInt16LE(8) & ~8, 8);
+      locals.push(local); centrals.push(c); offset += local.length;
+    }
+    if (!locals.length) throw new Error("pakette doku yok");
+    const cd = Buffer.concat(centrals), end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(locals.length, 8); end.writeUInt16LE(locals.length, 10);
+    end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+    fs.writeFileSync(out + ".tmp", Buffer.concat([...locals, cd, end])); fs.renameSync(out + ".tmp", out);
+    log("Doku paketi hazırlandı:", locals.length, "doku,", Math.round(offset / 1024), "KB");
+    return out;
+  } catch (e) { log("Doku paketi okunamadı:", e.message); return null; }
+}
 const server = http.createServer(async (req, res) => {
   const url = decodeURIComponent((req.url || "/").split("?")[0]);
   const send = (code, type, body, cache) => { res.writeHead(code, { "Content-Type": type, "Cache-Control": cache || "no-cache" }); res.end(body); };
@@ -63,8 +101,8 @@ const server = http.createServer(async (req, res) => {
   if (m) { const f = path.join(WEB, "tex", m[1]); return fs.existsSync(f) ? send(200, "image/png", fs.readFileSync(f), "max-age=86400") : send(404, "text/plain", "404"); }
   // The server's own default texture pack: pack.zip next to server.js, put there by whoever runs the relay.
   if (url === "/pack.json" || url === "/pack.zip") {
-    const f = path.join(__dirname, "pack.zip");
-    let st = null; try { st = fs.statSync(f); } catch (e) { }
+    const f = slimPack();
+    let st = null; try { st = f && fs.statSync(f); } catch (e) { }
     if (!st || !st.isFile()) return send(404, "text/plain", "404");
     if (url === "/pack.json") return send(200, "application/json", JSON.stringify({ name: process.env.PACK_NAME || "Sunucu paketi", size: st.size, v: Math.round(st.mtimeMs) }));
     res.writeHead(200, { "Content-Type": "application/zip", "Content-Length": st.size, "Cache-Control": "max-age=3600" });

@@ -6,3 +6,5 @@ relay.pid
 android/build/
 pack.zip
 pack.zip.tmp
+pack-web.zip
+pack-web.zip.tmp
