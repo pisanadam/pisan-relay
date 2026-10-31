@@ -48,6 +48,7 @@ public final class PisanRelay {
         // pisan-relay-key.txt next to it.
         int port = Integer.parseInt(args.length > 0 ? args[0] : env("SERVER_PORT", env("PORT", propertiesPort())));
         key = args.length > 1 ? args[1] : env("RELAY_KEY", readKeyFile());
+        target = args.length > 2 ? args[2] : env("MC_SERVER", target);
         if (key.length() < 8) {
             System.err.println("Kullanım: java -jar PisanRelay.jar <port> <anahtar (en az 8 karakter)>  — ya da yanına pisan-relay-key.txt koy");
             System.exit(1);
@@ -164,14 +165,132 @@ public final class PisanRelay {
 
     static final String OFFLINE = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         + "<title>Pisan Lig</title><body style='margin:0;min-height:100vh;display:grid;place-items:center;background:#4a3420;color:#fff;"
-        + "font:18px monospace;text-align:center;padding:20px'><div><h1 style='color:#ffe36a'>PISAN LIG</h1>"
-        + "<p>Minecraft sunucusu şu an kapalı.</p><p style='color:#ccc'>Sunucu açılınca bu sayfa kendiliğinden oyunu açar.</p></div>"
-        + "<script>setTimeout(()=>location.reload(),10000)</script>";
+        + "font:18px monospace;text-align:center;padding:20px;text-shadow:2px 2px 0 #3f3f3f'><div style='max-width:440px'>"
+        + "<h1 style='color:#ffe36a;text-shadow:3px 3px 0 #6b4b00'>PISAN LIG</h1><p id=m>Minecraft sunucusu şu an kapalı.</p>"
+        + "<button id=b style='width:100%;padding:14px;font:inherit;color:#fff;background:#7d7d7d;border:2px solid #000;"
+        + "box-shadow:inset 2px 2px 0 #b8b8b8,inset -2px -2px 0 #565656;cursor:pointer'>OYNA</button>"
+        + "<p id=s style='color:#ccc;font-size:14px'>Oyna'ya basınca sunucu başlatılır; açılınca oyun kendiliğinden gelir.</p></div>"
+        + "<script>const b=document.getElementById('b'),m=document.getElementById('m'),s=document.getElementById('s');let t=0;"
+        + "function poll(){fetch('/status',{cache:'no-store'}).then(r=>r.json()).then(o=>{if(o.online)location.reload();else{"
+        + "if(o.wake)s.textContent=o.wake;setTimeout(poll,3000);}}).catch(()=>setTimeout(poll,5000));}"
+        + "b.onclick=()=>{b.disabled=true;b.textContent='Sunucu başlatılıyor…';m.textContent='Exaroton bekleme alanındasın.';"
+        + "fetch('/wake',{cache:'no-store'}).then(r=>r.json()).then(o=>{s.textContent=o.wake||'';}).catch(()=>{});"
+        + "setInterval(()=>{t++;b.textContent='Sunucu başlatılıyor… '+t+' sn';},1000);};poll();</script>";
+
+    /* Where the Minecraft server is (the plugin's host); a join attempt here wakes a sleeping exaroton server. */
+    static String target = "pisan-sf-league.exaroton.me";
+    static volatile String wakeStatus = "";
+    static volatile long lastWake;
+
+    /*
+     * Knocks like a Minecraft client: handshake (1.20.1, login) and Login Start. Hosts with "start on join"
+     * (exaroton) start the server and answer with a "starting" disconnect, which is passed on to the page.
+     */
+    static synchronized String wake() {
+        long now = System.currentTimeMillis();
+        if (now - lastWake < 20000) {
+            return wakeStatus;
+        }
+        lastWake = now;
+        String host = target;
+        int port = 25565;
+        int colon = host.lastIndexOf(':');
+        if (colon > 0) {
+            port = Integer.parseInt(host.substring(colon + 1));
+            host = host.substring(0, colon);
+        }
+        try (Socket s = new Socket()) {
+            s.connect(new java.net.InetSocketAddress(host, port), 8000);
+            s.setSoTimeout(8000);
+            OutputStream out = s.getOutputStream();
+            ByteArrayOutputStream hs = new ByteArrayOutputStream();
+            writeVarInt(hs, 0x00);
+            writeVarInt(hs, 763);
+            writeString(hs, host);
+            hs.write(port >> 8);
+            hs.write(port & 0xFF);
+            writeVarInt(hs, 2);
+            ByteArrayOutputStream login = new ByteArrayOutputStream();
+            writeVarInt(login, 0x00);
+            writeString(login, "PisanLig");
+            login.write(0);
+            frame(out, hs.toByteArray());
+            frame(out, login.toByteArray());
+            out.flush();
+            DataInputStream in = new DataInputStream(s.getInputStream());
+            int length = readVarInt(in);
+            byte[] packet = new byte[Math.min(length, 65536)];
+            in.readFully(packet);
+            DataInputStream p = new DataInputStream(new java.io.ByteArrayInputStream(packet));
+            int id = readVarInt(p);
+            String reply = "";
+            if (id == 0x00) {
+                byte[] text = new byte[readVarInt(p)];
+                p.readFully(text);
+                // The kick message is a JSON text component: keep just its words.
+                Matcher words = Pattern.compile("\"text\":\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(new String(text, StandardCharsets.UTF_8));
+                StringBuilder b = new StringBuilder();
+                while (words.find()) {
+                    b.append(words.group(1));
+                }
+                reply = b.toString().replace("\\n", " ").replaceAll("§.", "").replaceAll("\\s+", " ").trim();
+            }
+            wakeStatus = reply.isEmpty() ? "Sunucuya başlatma isteği gönderildi." : reply;
+            log("Sunucu uyandırma isteği gönderildi: " + wakeStatus);
+        }
+        catch (IOException ex) {
+            wakeStatus = "Sunucuya ulaşılamadı: " + ex.getMessage();
+            log(wakeStatus);
+        }
+        return wakeStatus;
+    }
+
+    static void frame(OutputStream out, byte[] body) throws IOException {
+        ByteArrayOutputStream len = new ByteArrayOutputStream();
+        writeVarInt(len, body.length);
+        out.write(len.toByteArray());
+        out.write(body);
+    }
+
+    static void writeVarInt(ByteArrayOutputStream out, int value) {
+        while ((value & ~0x7F) != 0) {
+            out.write((value & 0x7F) | 0x80);
+            value >>>= 7;
+        }
+        out.write(value);
+    }
+
+    static void writeString(ByteArrayOutputStream out, String text) {
+        byte[] b = text.getBytes(StandardCharsets.UTF_8);
+        writeVarInt(out, b.length);
+        out.write(b, 0, b.length);
+    }
+
+    static int readVarInt(DataInputStream in) throws IOException {
+        int value = 0;
+        for (int shift = 0; shift < 35; shift += 7) {
+            int b = in.readUnsignedByte();
+            value |= (b & 0x7F) << shift;
+            if ((b & 0x80) == 0) {
+                return value;
+            }
+        }
+        throw new IOException("varint");
+    }
 
     /* Files come from the plugin (one source of truth) and are kept here; the page is re-asked each time. */
     static void file(OutputStream out, String path) throws IOException {
         if (path.length() > 200 || !path.matches("/[A-Za-z0-9_./?=&%-]*") || path.contains("..")) {
             http(out, 404, "text/plain", "no-store", "404".getBytes(StandardCharsets.UTF_8));
+            return;
+        }
+        if (path.equals("/status")) {
+            http(out, 200, "application/json", "no-store", ("{\"online\":" + (plugin != null) + ",\"wake\":" + quote(wakeStatus) + "}").getBytes(StandardCharsets.UTF_8));
+            return;
+        }
+        if (path.equals("/wake")) {
+            String status = plugin != null ? "Sunucu açık." : wake();
+            http(out, 200, "application/json", "no-store", ("{\"wake\":" + quote(status) + "}").getBytes(StandardCharsets.UTF_8));
             return;
         }
         boolean page = path.equals("/") || path.startsWith("/?") || path.startsWith("/oyna");

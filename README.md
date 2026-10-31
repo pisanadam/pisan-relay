@@ -28,3 +28,10 @@ web-relay-key: "<ANAHTAR>"
 ```bash
 javac --release 11 -d out PisanRelay.java && printf "Main-Class: PisanRelay\n" > m.txt && jar cfm PisanRelay.jar m.txt -C out .
 ```
+
+## Sunucuyu uyandırma
+
+Minecraft sunucusu kapalıyken sayfada **OYNA**'ya basılırsa köprü, gerçek bir Minecraft istemcisi gibi sunucu adresine
+giriş isteği gönderir (1.20.1 el sıkışma + giriş). Exaroton'un "oyuncu girince başlat" özelliği sunucuyu açar; eklenti
+köprüye bağlanınca sayfa kendiliğinden oyuna geçer. Hedef adres varsayılan olarak `pisan-sf-league.exaroton.me`;
+değiştirmek için 3. argüman ya da `MC_SERVER` ortam değişkeni.
