@@ -61,6 +61,15 @@ const server = http.createServer(async (req, res) => {
   if (url === "/" || url === "/oyna") return send(200, "text/html; charset=utf-8", fs.readFileSync(path.join(WEB, "game.html")));
   let m = url.match(/^\/tex\/((?:item\/)?[a-z0-9_]{1,64}\.png)$/);
   if (m) { const f = path.join(WEB, "tex", m[1]); return fs.existsSync(f) ? send(200, "image/png", fs.readFileSync(f), "max-age=86400") : send(404, "text/plain", "404"); }
+  // The server's own default texture pack: pack.zip next to server.js, put there by whoever runs the relay.
+  if (url === "/pack.json" || url === "/pack.zip") {
+    const f = path.join(__dirname, "pack.zip");
+    let st = null; try { st = fs.statSync(f); } catch (e) { }
+    if (!st || !st.isFile()) return send(404, "text/plain", "404");
+    if (url === "/pack.json") return send(200, "application/json", JSON.stringify({ name: process.env.PACK_NAME || "Sunucu paketi", size: st.size, v: Math.round(st.mtimeMs) }));
+    res.writeHead(200, { "Content-Type": "application/zip", "Content-Length": st.size, "Cache-Control": "max-age=3600" });
+    return fs.createReadStream(f).pipe(res);
+  }
   m = url.match(/^\/skin\/(@ball|[A-Za-z0-9_]{1,16})$/);
   if (m) { const png = await skinPng(m[1]); return png ? send(200, "image/png", png, "max-age=600") : send(404, "text/plain", "404"); }
   send(404, "text/plain", "404");

@@ -4,3 +4,5 @@ node/
 relay.log
 relay.pid
 android/build/
+pack.zip
+pack.zip.tmp

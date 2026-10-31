@@ -20,6 +20,13 @@ if [ ! -s pisan-relay-key.txt ]; then
 fi
 chmod 600 pisan-relay-key.txt
 
+# Optional default texture pack for every player: PACK_URL=<zip link> before the command downloads it once
+# (it stays as pack.zip in this folder across updates; delete pack.zip to go back to the bundled textures).
+if [ -n "${PACK_URL:-}" ]; then
+  echo "Doku paketi indiriliyor…"
+  curl -fL "$PACK_URL" -o pack.zip.tmp && mv pack.zip.tmp pack.zip || { rm -f pack.zip.tmp; echo "Paket indirilemedi." >&2; }
+fi
+
 echo "Köprü indiriliyor…"
 curl -fsSL "$REPO" -o relay.tar.gz
 rm -rf src.tmp && mkdir src.tmp && tar -xzf relay.tar.gz -C src.tmp --strip-components=1 && rm relay.tar.gz

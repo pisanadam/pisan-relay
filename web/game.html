@@ -224,7 +224,7 @@
   };
   // ---------- texture pack ----------
   const idb = cb => { try { const rq = indexedDB.open("pisan", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("kv"); rq.onsuccess = () => cb(rq.result); rq.onerror = () => {}; } catch (e) {} };
-  async function usePack(file, save) {
+  async function usePack(file, save, label) {
     document.querySelectorAll(".packName").forEach(e => e.textContent = "Yükleniyor…");
     try {
       const zip = await JSZip.loadAsync(file);
@@ -238,7 +238,7 @@
       const blocks = [...map.keys()].filter(k => !k.includes("/")).length;
       if (!map.size) throw new Error("Pakette doku yok");
       userPack = map; resetTextures();
-      document.querySelectorAll(".packName").forEach(e => e.textContent = "Kendi paketin: " + (file.name || "kayıtlı paket") + " (" + blocks + " blok, " + (map.size - blocks) + " eşya/menü dokusu)");
+      document.querySelectorAll(".packName").forEach(e => e.textContent = (label || "Kendi paketin: " + (file.name || "kayıtlı paket")) + " (" + blocks + " blok, " + (map.size - blocks) + " eşya/menü dokusu)");
       if (save) idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").put(file, "pack"); } catch (e) {} });
     } catch (err) {
       document.querySelectorAll(".packName").forEach(e => e.textContent = "Paket okunamadı: " + err.message);
@@ -249,9 +249,32 @@
     userPack = null; resetTextures();
     idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").delete("pack"); } catch (e) {} });
     document.querySelectorAll(".packName").forEach(e => e.textContent = "Varsayılan: Pixel Perfection CE");
+    serverPack();
   });
+  /* The server's default pack (pack.zip on the relay), kept on this device until the server changes it.
+     A pack the player picked themselves comes first. */
+  async function serverPack() {
+    let info = null;
+    try { const r = await fetch("/pack.json", { cache: "no-store" }); if (r.ok) info = await r.json(); } catch (e) { }
+    if (!info) return;
+    const label = "Varsayılan: " + info.name;
+    idb(db => {
+      let rq; try { rq = db.transaction("kv").objectStore("kv").get("serverpack"); } catch (e) { return; }
+      rq.onsuccess = async () => {
+        const kept = rq.result;
+        if (kept && kept.v === info.v && kept.blob) return usePack(kept.blob, false, label);
+        document.querySelectorAll(".packName").forEach(e => e.textContent = "Sunucunun doku paketi indiriliyor…");
+        try {
+          const r = await fetch("/pack.zip"); if (!r.ok) throw 0;
+          const blob = await r.blob();
+          try { db.transaction("kv", "readwrite").objectStore("kv").put({ v: info.v, blob }, "serverpack"); } catch (e) { }
+          usePack(blob, false, label);
+        } catch (e) { document.querySelectorAll(".packName").forEach(e => e.textContent = "Varsayılan: Pixel Perfection CE"); }
+      };
+    });
+  }
   $("packFile").onchange = () => { const f = $("packFile").files[0]; if (f) usePack(f, true); };
-  idb(db => { try { const rq = db.transaction("kv").objectStore("kv").get("pack"); rq.onsuccess = () => { if (rq.result) usePack(rq.result, false); }; } catch (e) {} });
+  idb(db => { try { const rq = db.transaction("kv").objectStore("kv").get("pack"); rq.onsuccess = () => { if (rq.result) usePack(rq.result, false); else serverPack(); }; rq.onerror = () => serverPack(); } catch (e) { serverPack(); } });
 
   // ---------- block textures, drawn here in the Minecraft spirit (no Mojang files) ----------
   const T = 16, ATLAS = 64;
