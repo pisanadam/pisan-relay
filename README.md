@@ -1,8 +1,9 @@
 # Pisan Lig köprüsü
 
-Tarayıcıdan (telefon ve bilgisayar) **Pisan Lig** Minecraft sunucusuna gerçek oyuncu olarak girmeyi sağlar.
+Tarayıcıdan (telefon ve bilgisayar) Minecraft sunucularına gerçek oyuncu olarak girmeyi sağlar; varsayılan sunucu **Pisan Lig**.
 Her tarayıcı oyuncusu için köprüde gerçek bir Minecraft 1.20.1 istemcisi ([mineflayer](https://github.com/PrismarineJS/mineflayer), MIT)
-çalışır ve yalnızca `pisan-sf-league.exaroton.me` sunucusuna bağlanır. Sunucu kapalıysa bu bağlantı exaroton'un
+çalışır. Sürüm sunucudan otomatik bulunur (1.8 – en yeni). Cracked sunuculara sadece adla, online sunuculara Microsoft hesabıyla
+(cihaz koduyla) girilir; Microsoft oturumu yalnızca o bağlantı boyunca tutulur. Varsayılan sunucu `pisan-sf-league.exaroton.me`. Sunucu kapalıysa bu bağlantı exaroton'un
 "oyuncu girince başlat" özelliğini tetikler; sunucu açılınca oyuncu içeri girer.
 
 Tarayıcıda Minecraft benzeri küp dünya çizilir; blokları, oyuncuları, envanteri, menüleri ve sohbeti bu istemciden alır.

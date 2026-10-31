@@ -55,6 +55,7 @@
   .icon { width:30px; height:30px; image-rendering:pixelated; }
   .glow { filter:drop-shadow(0 0 3px #c58cff) drop-shadow(0 0 2px #c58cff); }
   .count { position:absolute; right:2px; bottom:0; font-size:12px; }
+  #stats { position:absolute; bottom:70px; left:50%; transform:translateX(-50%); width:400px; max-width:90vw; display:flex; justify-content:space-between; pointer-events:none; font-size:15px; }
   #xp { position:absolute; bottom:56px; left:50%; width:360px; max-width:80vw; transform:translateX(-50%); height:7px; background:#000; border:1px solid #222; pointer-events:none; }
   #xp i { display:block; height:100%; width:0; background:#80ff20; }
   #xp.power i { background:#b04cff; }
@@ -96,7 +97,11 @@
     <h1>PISAN LIG</h1>
     <p class="sub">Minecraft sunucusuna tarayıcıdan gerçek oyuncu olarak gir</p>
     <label for="name">Oyuncu adı</label>
-    <input class="field" id="name" maxlength="9" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
+    <input class="field" id="name" maxlength="16" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
+    <label for="server">Sunucu</label>
+    <input class="field" id="server" maxlength="80" placeholder="pisan-sf-league.exaroton.me" autocapitalize="off" spellcheck="false">
+    <label for="auth">Giriş</label>
+    <select class="field" id="auth"><option value="offline">Sadece ad (cracked sunucular, Pisan Lig)</option><option value="microsoft">Microsoft hesabı (online sunucular)</option></select>
     <label for="skin">Skin (bir Minecraft kullanıcı adı, isteğe bağlı)</label>
     <input class="field" id="skin" maxlength="16" placeholder="Notch" autocapitalize="off" spellcheck="false">
     <label for="sens">Bakış hassasiyeti</label>
@@ -120,6 +125,7 @@
   <div id="subtitle"></div>
   <div id="actionbar"></div>
   <div id="xp"><i></i></div>
+  <div id="stats"></div>
   <div id="hotbar"></div>
   <div id="look"></div>
   <div id="stick"></div><div id="knob"><i></i></div>
@@ -128,7 +134,7 @@
   <div class="tb" id="bJump">ZIPLA</div>
   <div class="tb" id="bLeft">SOL</div>
   <div class="tb" id="bRight">SAĞ</div>
-  <div id="top"><div class="tb" id="bChat">T</div><div class="tb" id="bCam">F5</div><div class="tb" id="bSet">⚙</div><div class="tb" id="bFs">⛶</div><div class="tb" id="bQuit">Çık</div></div>
+  <div id="top"><div class="tb" id="bInv">E</div><div class="tb" id="bChat">T</div><div class="tb" id="bCam">F5</div><div class="tb" id="bSet">⚙</div><div class="tb" id="bFs">⛶</div><div class="tb" id="bQuit">Çık</div></div>
   <div id="chatBox"><input class="field" id="chatInput" maxlength="200" placeholder="Mesaj veya /komut" autocomplete="off"><button class="mcbtn" id="chatSend" style="width:auto">Gönder</button></div>
   <div id="overlay"><div class="panel" id="panel"></div></div>
 </section>
@@ -188,13 +194,18 @@
     ws.onclose = () => { ws = null; if (playing) $("loginErr").textContent = "Bağlantı koptu; sunucu kapanmış olabilir."; playing = false; show("login"); };
   }
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  $("server").value = store.get("pisan-web-server") || "";
+  $("auth").value = store.get("pisan-web-auth") || "offline";
   $("go").onclick = () => {
-    const n = $("name").value.trim(), skin = $("skin").value.trim();
-    if (!/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Ad: 3–9 karakter; harf, rakam, _ (oyunda başına (mobil) eklenir)."; return; }
+    const n = $("name").value.trim(), skin = $("skin").value.trim(), server = $("server").value.trim().toLowerCase(), auth = $("auth").value;
+    const home = !server || server === "pisan-sf-league.exaroton.me";
+    if (home && !/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Pisan Lig için ad 3–9 karakter (başına (mobil) eklenir)."; return; }
+    if (!home && !/^[A-Za-z0-9_]{3,16}$/.test(n)) { $("loginErr").textContent = "Ad: 3–16 karakter; harf, rakam, _."; return; }
+    if (server && !/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(server)) { $("loginErr").textContent = "Sunucu adresi geçersiz."; return; }
     if (skin && !/^[A-Za-z0-9_]{1,16}$/.test(skin)) { $("loginErr").textContent = "Skin adı geçersiz."; return; }
-    store.set("pisan-web-name", n); store.set("pisan-web-skin", skin);
+    store.set("pisan-web-name", n); store.set("pisan-web-skin", skin); store.set("pisan-web-server", server); store.set("pisan-web-auth", auth);
     $("loginErr").textContent = "Bağlanıyor…";
-    connect(() => send({ t: "hello", name: n, skin }));
+    connect(() => send({ t: "hello", name: n, skin, server, auth }));
   };
   // ---------- texture pack ----------
   const idb = cb => { try { const rq = indexedDB.open("pisan", 1); rq.onupgradeneeded = () => rq.result.createObjectStore("kv"); rq.onsuccess = () => cb(rq.result); rq.onerror = () => {}; } catch (e) {} };
@@ -227,7 +238,7 @@
   idb(db => { try { const rq = db.transaction("kv").objectStore("kv").get("pack"); rq.onsuccess = () => { if (rq.result) usePack(rq.result, false); }; } catch (e) {} });
 
   // ---------- block textures, drawn here in the Minecraft spirit (no Mojang files) ----------
-  const T = 16, ATLAS = 16;
+  const T = 16, ATLAS = 64;
   const atlas = document.createElement("canvas"); atlas.width = atlas.height = T * ATLAS;
   const ac = atlas.getContext("2d");
   const tiles = new Map(); let nextTile = 0;
@@ -263,6 +274,11 @@
   }
   function candidates(name, face) {
     let m = name.toLowerCase();
+    if (m === "water") return ["water_still"];
+    if (m === "lava") return ["lava_still"];
+    if (m === "short_grass") return ["short_grass", "grass"];
+    if (m.startsWith("tall_") || m.startsWith("large_") || m.endsWith("sunflower") || m === "lilac" || m === "rose_bush" || m === "peony") return [m + "_top", m + "_front", m];
+    if (m.endsWith("_log") || m.endsWith("_stem") || m.endsWith("_wood") || m.endsWith("_hyphae")) return face === "side" ? [m, m.replace(/_wood$/, "_log").replace(/_hyphae$/, "_stem")] : [m + "_top", m.replace(/_wood$/, "_log") + "_top", m];
     if (m === "grass_block") return face === "top" ? ["grass_block_top"] : face === "bottom" ? ["dirt"] : ["grass_block_side"];
     if (m.endsWith("_banner")) return [m.replace("_banner", "_wool")];
     if (m.endsWith("_wall_sign") || m.endsWith("_sign")) return [m.replace(/_wall_sign$|_sign$/, "_planks")];
@@ -272,7 +288,8 @@
     if (face === "bottom") return [m + "_bottom", m + "_top", m];
     return [m + "_side", m];
   }
-  const TINT = { grass_block_top: [145, 189, 89], grass_block_side_overlay: [145, 189, 89], oak_leaves: [119, 171, 47] };
+  const TINT = { grass_block_top: [145, 189, 89], grass_block_side_overlay: [145, 189, 89], grass: [145, 189, 89], short_grass: [145, 189, 89], tall_grass_top: [145, 189, 89], tall_grass_bottom: [145, 189, 89], fern: [145, 189, 89], large_fern_top: [145, 189, 89], vine: [119, 171, 47], lily_pad: [32, 128, 48], sugar_cane: [145, 189, 89], water_still: [63, 118, 228], birch_leaves: [128, 167, 85], spruce_leaves: [97, 153, 97] };
+  const tintOf = file => TINT[file] || (file.endsWith("_leaves") && !file.startsWith("azalea") && !file.startsWith("flowering") && !file.startsWith("cherry") ? [119, 171, 47] : null);
   async function realTexture(name, face, tx, ty) {
     for (const file of candidates(name, face)) {
       const img = await loadImg(file);
@@ -280,7 +297,7 @@
       const c = document.createElement("canvas"); c.width = c.height = T; const g = c.getContext("2d");
       g.imageSmoothingEnabled = false;
       g.drawImage(img, 0, 0, img.width, img.width, 0, 0, T, T); // animated strips: first frame
-      const tint = TINT[file];
+      const tint = tintOf(file);
       const data = g.getImageData(0, 0, T, T);
       if (tint) for (let i = 0; i < data.data.length; i += 4) for (let k = 0; k < 3; k++) data.data[i + k] = data.data[i + k] * tint[k] / 255;
       if (file === "grass_block_side") {
@@ -340,22 +357,38 @@
   const worldGroup = new THREE.Group(); scene.add(worldGroup);
   function clearWorld() { while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); } }
 
-  const TRANSPARENT = n => n.includes("GLASS");
-  const SKIP = n => n === "AIR" || n === "CAVE_AIR" || n === "VOID_AIR" || n === "BARRIER" || n === "LIGHT" || n.endsWith("_SIGN") || n.includes("TORCH") || n.includes("BANNER");
+  const TRANSPARENT = n => n.includes("GLASS") || n.endsWith("_LEAVES") || n === "ICE" || n.includes("SLIME_BLOCK") || n.includes("HONEY_BLOCK") || n === "SPAWNER" || n.endsWith("_GRATE");
+  const FLUID = n => n === "WATER" || n === "LAVA" || n === "BUBBLE_COLUMN";
+  const SKIP = n => n === "AIR" || n === "CAVE_AIR" || n === "VOID_AIR" || n === "BARRIER" || n === "LIGHT" || n === "STRUCTURE_VOID" || n.includes("BANNER") || n.endsWith("_SIGN") || n === "MOVING_PISTON";
+  const PLANT = n => /GRASS$|FERN$|FLOWER|SAPLING|DANDELION|POPPY|TULIP|ORCHID|ALLIUM|BLUET|DAISY|CORNFLOWER|LILY_OF|ROSE|BUSH$|LILAC|PEONY|WHEAT|CARROTS|POTATOES|BEETROOTS|SUGAR_CANE|KELP|SEAGRASS|VINE|MUSHROOM$|ROOTS|SPROUTS|DEAD_BUSH|COBWEB|_CORAL$|_FAN$|PICKLE|SWEET_BERRY|PITCHER|TORCHFLOWER|SPORE|DRIPLEAF|HANGING|BAMBOO_SAPLING|NETHER_WART|AZALEA$|PROPAGULE|SNOW$/.test(n) && !n.endsWith("_BLOCK");
   const FACES = [
-    { d: [1, 0, 0], shade: 0.6, f: "side", c: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]] },
-    { d: [-1, 0, 0], shade: 0.6, f: "side", c: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]] },
-    { d: [0, 1, 0], shade: 1.0, f: "top", c: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] },
-    { d: [0, -1, 0], shade: 0.5, f: "bottom", c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] },
-    { d: [0, 0, 1], shade: 0.8, f: "side", c: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]] },
-    { d: [0, 0, -1], shade: 0.8, f: "side", c: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]] }
+    { d: [1, 0, 0], shade: 0.6, f: "side", c: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], uv: (b) => [b[2], b[1], b[5], b[4]] },
+    { d: [-1, 0, 0], shade: 0.6, f: "side", c: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], uv: (b) => [b[2], b[1], b[5], b[4]] },
+    { d: [0, 1, 0], shade: 1.0, f: "top", c: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], uv: (b) => [b[0], b[2], b[3], b[5]] },
+    { d: [0, -1, 0], shade: 0.5, f: "bottom", c: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], uv: (b) => [b[0], b[2], b[3], b[5]] },
+    { d: [0, 0, 1], shade: 0.8, f: "side", c: [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], uv: (b) => [b[0], b[1], b[3], b[4]] },
+    { d: [0, 0, -1], shade: 0.8, f: "side", c: [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], uv: (b) => [b[0], b[1], b[3], b[4]] }
   ];
-  function quad(buf, name, f, pts) {
-    const uv = tile(name, f.f); const base = buf.pos.length / 3;
+  /* One face; part = [u0,v0,u1,v1] in 0..1 of the tile, so a slab's side shows half the texture. */
+  function quad(buf, name, f, pts, part) {
+    const t = tile(name, f.f); const base = buf.pos.length / 3;
+    const [a0, b0, a1, b1] = part || [0, 0, 1, 1];
+    const u = k => t[0] + (t[2] - t[0]) * k, v = k => t[1] + (t[3] - t[1]) * k;
     for (const p of pts) buf.pos.push(p[0], p[1], p[2]);
-    buf.uv.push(uv[0], uv[1], uv[0], uv[3], uv[2], uv[3], uv[2], uv[1]);
+    buf.uv.push(u(a0), v(b0), u(a0), v(b1), u(a1), v(b1), u(a1), v(b0));
     for (let k = 0; k < 4; k++) buf.col.push(f.shade, f.shade, f.shade);
     buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+  function cross(buf, name, x, y, z, h) {
+    const t = tile(name, "side");
+    const pts = [[[x + 0.15, y, z + 0.15], [x + 0.15, y + h, z + 0.15], [x + 0.85, y + h, z + 0.85], [x + 0.85, y, z + 0.85]], [[x + 0.85, y, z + 0.15], [x + 0.85, y + h, z + 0.15], [x + 0.15, y + h, z + 0.85], [x + 0.15, y, z + 0.85]]];
+    for (const q of pts) {
+      const base = buf.pos.length / 3;
+      for (const p of q) buf.pos.push(p[0], p[1], p[2]);
+      buf.uv.push(t[0], t[1], t[0], t[3], t[2], t[3], t[2], t[1]);
+      for (let k = 0; k < 4; k++) buf.col.push(0.9, 0.9, 0.9);
+      buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
   }
   function buildWorld(o) {
     clearWorld();
@@ -363,18 +396,43 @@
     const ids = new Uint16Array(n); let p = 0;
     for (const part of o.runs.split(",")) { const [id, cnt] = part.split("*"); const c = cnt ? +cnt : 1; ids.fill(+id, p, p + c); p += c; }
     const at = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) ? 0 : ids[(y * nz + z) * nx + x];
-    const pal = o.pal;
+    const pal = o.pal.map(e => typeof e === "string" ? { n: e } : e);
     region = { ids, nx, ny, nz, x0: o.x0, y0: o.y0, z0: o.z0, pal };
-    const solid = id => id !== 0 && !SKIP(pal[id]) && !TRANSPARENT(pal[id]);
-    const out = { o: { pos: [], uv: [], col: [], idx: [] }, t: { pos: [], uv: [], col: [], idx: [] } };
+    const opaqueCube = id => { if (!id) return false; const e = pal[id]; return !e.s && !SKIP(e.n) && !TRANSPARENT(e.n) && !FLUID(e.n); };
+    const out = { o: { pos: [], uv: [], col: [], idx: [] }, t: { pos: [], uv: [], col: [], idx: [] }, w: { pos: [], uv: [], col: [], idx: [] } };
     for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       const id = ids[(y * nz + z) * nx + x]; if (!id) continue;
-      const name = pal[id]; if (SKIP(name)) continue;
+      const e = pal[id], name = e.n; if (SKIP(name)) continue;
+      const wx = o.x0 + x, wy = o.y0 + y, wz = o.z0 + z;
+      if (FLUID(name)) {
+        const top = at(x, y + 1, z) === id ? 1 : 0.875;
+        for (const f of FACES) {
+          const nb = at(x + f.d[0], y + f.d[1], z + f.d[2]);
+          if (nb === id || opaqueCube(nb)) continue;
+          quad(out.w, name, f, f.c.map(c => [wx + c[0], wy + c[1] * top, wz + c[2]]));
+        }
+        continue;
+      }
+      if (e.s && e.s.length === 0) {
+        if (PLANT(name)) cross(out.t, name, wx, wy, wz, name.startsWith("SNOW") ? 0.15 : 0.95);
+        else if (name.includes("TORCH")) for (const f of FACES) quad(out.o, name, f, f.c.map(c => [wx + 0.44 + c[0] * 0.12, wy + c[1] * 0.62, wz + 0.44 + c[2] * 0.12]), [0.44, 0, 0.56, 0.62]);
+        continue;
+      }
       const trans = TRANSPARENT(name); const buf = trans ? out.t : out.o;
+      if (e.s) {
+        // Stairs, slabs, fences, walls, panes, carpets…: each part of the block as a box.
+        for (const b of e.s) for (const f of FACES) {
+          const full = (f.d[0] === 1 && b[3] === 1) || (f.d[0] === -1 && b[0] === 0) || (f.d[1] === 1 && b[4] === 1) || (f.d[1] === -1 && b[1] === 0) || (f.d[2] === 1 && b[5] === 1) || (f.d[2] === -1 && b[2] === 0);
+          if (full && opaqueCube(at(x + f.d[0], y + f.d[1], z + f.d[2]))) continue;
+          const pts = f.c.map(c => [wx + (c[0] ? b[3] : b[0]), wy + (c[1] ? b[4] : b[1]), wz + (c[2] ? b[5] : b[2])]);
+          quad(buf, name, f, pts, f.uv(b));
+        }
+        continue;
+      }
       for (const f of FACES) {
         const nb = at(x + f.d[0], y + f.d[1], z + f.d[2]);
-        if (solid(nb) || (trans && nb === id)) continue;
-        quad(buf, name, f, f.c.map(c => [o.x0 + x + c[0], o.y0 + y + c[1], o.z0 + z + c[2]]));
+        if (opaqueCube(nb) || (trans && nb === id)) continue;
+        quad(buf, name, f, f.c.map(c => [wx + c[0], wy + c[1], wz + c[2]]));
       }
     }
     // Block displays (goal posts, nets, flags): scaled boxes.
@@ -396,9 +454,9 @@
       g.setAttribute("uv", new THREE.Float32BufferAttribute(b.uv, 2));
       g.setAttribute("color", new THREE.Float32BufferAttribute(b.col, 3));
       g.setIndex(b.idx);
-      const t = key === "t";
-      const m = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: t, side: t ? THREE.DoubleSide : THREE.FrontSide, depthWrite: !t });
-      const mesh = new THREE.Mesh(g, m); mesh.renderOrder = t ? 2 : 0; worldGroup.add(mesh);
+      const t = key !== "o";
+      const m = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: t, opacity: key === "w" ? 0.7 : 1, alphaTest: key === "t" ? 0.3 : 0, side: t ? THREE.DoubleSide : THREE.FrontSide, depthWrite: key !== "w" });
+      const mesh = new THREE.Mesh(g, m); mesh.renderOrder = key === "w" ? 3 : (t ? 2 : 0); worldGroup.add(mesh);
     }
   }
 
@@ -469,7 +527,45 @@
     s.scale.set(w / 40 * 0.32, 0.32, 1); s.position.y = 2.15; s.renderOrder = 5;
     return s;
   }
+  // Mobs: tall thin ones as a player-shaped body in their colour, the rest as a body and a head.
+  function mobColour(name) { const h = hashStr(name); return new THREE.Color().setHSL((h % 360) / 360, 0.35, 0.45); }
+  function makeMob(p) {
+    const root = new THREE.Group();
+    const col = mobColour(p.name), dark = col.clone().multiplyScalar(0.7);
+    const mat = new THREE.MeshBasicMaterial({ color: col }), headMat = new THREE.MeshBasicMaterial({ color: dark });
+    const w = Math.max(0.2, p.w), h = Math.max(0.2, p.h);
+    const body = new THREE.Group(); root.add(body);
+    let head;
+    if (h >= 1.4 && w <= 0.9) {
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, h * 0.4, w * 0.45), mat); torso.position.y = h * 0.55; body.add(torso);
+      head = new THREE.Group(); head.position.y = h * 0.75; body.add(head);
+      const hm = new THREE.Mesh(new THREE.BoxGeometry(h * 0.25, h * 0.25, h * 0.25), headMat); hm.position.y = h * 0.125; head.add(hm);
+      const limb = x => { const g = new THREE.Group(); g.position.set(x, h * 0.375, 0); const m = new THREE.Mesh(new THREE.BoxGeometry(w * 0.35, h * 0.375, w * 0.35), mat); m.position.y = -h * 0.19; g.add(m); body.add(g); return g; };
+      root.legs = [limb(-w * 0.2), limb(w * 0.2)];
+    } else {
+      const torso = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.6, w * 1.4), mat); torso.position.y = h * 0.55; body.add(torso);
+      head = new THREE.Group(); head.position.set(0, h * 0.7, w * 0.8); body.add(head);
+      const s = Math.min(w, h) * 0.6; const hm = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), headMat); head.add(hm);
+      const leg = (x, z) => { const g = new THREE.Group(); g.position.set(x, h * 0.3, z); const m = new THREE.Mesh(new THREE.BoxGeometry(w * 0.25, h * 0.3, w * 0.25), headMat); m.position.y = -h * 0.15; g.add(m); body.add(g); return g; };
+      root.legs = [leg(-w * 0.3, w * 0.5), leg(w * 0.3, -w * 0.5), leg(w * 0.3, w * 0.5), leg(-w * 0.3, -w * 0.5)];
+    }
+    if (p.skin) { const tag = nameTag(p.skin, -1); tag.position.y = h + 0.35; root.add(tag); }
+    scene.add(root);
+    return { root, body, head, legs: root.legs, phase: 0, x: p.x, z: p.z, mob: true };
+  }
+  function makeItemEntity(p) {
+    const root = new THREE.Group();
+    const loader = new THREE.TextureLoader();
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, alphaTest: 0.4 });
+    const name = ITEM_ALIAS[p.name] || p.name;
+    loader.load("/tex/item/" + name + ".png", t => { t.magFilter = THREE.NearestFilter; mat.map = t; mat.needsUpdate = true; }, undefined, () => loader.load("/tex/" + name + ".png", t => { t.magFilter = THREE.NearestFilter; mat.map = t; mat.needsUpdate = true; }));
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), mat); m.position.y = 0.2; root.add(m);
+    scene.add(root);
+    return { root, body: m, item: true, x: p.x, z: p.z };
+  }
   function makeAvatar(p) {
+    if (p.kind === "m") return makeMob(p);
+    if (p.kind === "i") return makeItemEntity(p);
     const entry = skinTexture(p.skin, p.team);
     const mat = new THREE.MeshBasicMaterial({ map: entry.tex, transparent: true, alphaTest: 0.5 });
     const root = new THREE.Group();
@@ -499,6 +595,10 @@
     switch (o.t) {
       case "error": $("loginErr").textContent = o.text; if (playing) { playing = false; show("login"); } break;
       case "waking": waking(o.text); break;
+      case "msa":
+        clearInterval(wakeTimer); $("loginErr").style.color = "#ffe36a";
+        $("loginErr").innerHTML = "Microsoft girişi: <a style='color:#9cf' href='" + esc(o.url) + "' target='_blank' rel='noopener'>" + esc(o.url) + "</a> adresinde şu kodu gir:<br><b style='font-size:24px;letter-spacing:3px'>" + esc(o.code) + "</b>";
+        break;
       case "welcome":
         clearInterval(wakeTimer); wakeStart = 0; $("loginErr").style.color = "";
         myName = o.name; myId = o.me; playing = true; me.ready = false; snaps = [];
@@ -537,6 +637,10 @@
     }
   }
   function hud(o) {
+    if (o.hp !== undefined && o.gm !== "creative" && o.gm !== "spectator") {
+      const hearts = Math.ceil(o.hp / 2), food = Math.ceil(o.food / 2);
+      $("stats").innerHTML = "<span style='color:#ff4040'>" + "♥".repeat(hearts) + "<span style='color:#444'>" + "♥".repeat(Math.max(0, 10 - hearts)) + "</span></span><span style='color:#c87a2a'>" + "<span style='color:#444'>" + "●".repeat(Math.max(0, 10 - food)) + "</span>" + "●".repeat(food) + "</span>";
+    } else $("stats").innerHTML = "";
     if (o.r === undefined) { $("boss").style.display = "none"; return; }
     $("boss").style.display = "block";
     $("score").innerHTML = "<span style='color:#ff5555'>Kırmızı " + o.r + "</span> - <span style='color:#5599ff'>" + o.bl + " Mavi</span> <span style='color:#ddd'>" + esc(o.c) + "</span>";
@@ -584,6 +688,23 @@
     const p = $("panel"); p.innerHTML = "";
     const h = document.createElement("h3"); h.innerHTML = legacy(o.title, "#404040"); p.appendChild(h);
     const grid = document.createElement("div"); grid.className = "grid";
+    const slotOf = (item, slot) => {
+      const d = slotEl(item); d.className = "slot";
+      let pressTimer = 0, long = false;
+      d.onpointerdown = e => { e.preventDefault(); long = false; pressTimer = setTimeout(() => { long = true; info(item); send({ t: "click", slot, right: true, inv: !!o.inv }); }, 550); info(item); };
+      d.onpointerup = () => { clearTimeout(pressTimer); if (!long) send({ t: "click", slot, right: false, inv: !!o.inv }); };
+      d.onpointerleave = () => clearTimeout(pressTimer);
+      return d;
+    };
+    if (o.own && o.own.length) {
+      // The player's own inventory under the container (main rows, then the hotbar).
+      setTimeout(() => {
+        const sep = document.createElement("div"); sep.style.height = "8px"; p.insertBefore(sep, infoEl);
+        const ownGrid = document.createElement("div"); ownGrid.className = "grid";
+        o.own.forEach((item, i) => ownGrid.appendChild(slotOf(item, o.ownStart + i)));
+        p.insertBefore(ownGrid, infoEl);
+      }, 0);
+    }
     o.items.forEach((item, slot) => {
       const d = slotEl(item); d.className = "slot";
       let pressTimer = 0, long = false;
@@ -592,7 +713,7 @@
       d.onpointerleave = () => clearTimeout(pressTimer);
       grid.appendChild(d);
     });
-    p.appendChild(grid);
+    if (o.items.length) p.appendChild(grid);
     const infoEl = document.createElement("div"); infoEl.id = "menuInfo"; p.appendChild(infoEl);
     const close = document.createElement("button"); close.className = "mcbtn"; close.textContent = "Kapat"; close.onclick = () => { send({ t: "close" }); closeOverlay(); };
     p.appendChild(close);
@@ -609,6 +730,7 @@
     const c = document.createElement("button"); c.className = "mcbtn"; c.textContent = "Tamam"; c.onclick = closeOverlay; p.appendChild(c);
     $("overlay").classList.add("on");
   };
+  $("bInv").onclick = () => send({ t: "inv" });
   $("bChat").onclick = () => { $("chatBox").classList.toggle("on"); if ($("chatBox").classList.contains("on")) $("chatInput").focus(); };
   const sendChat = () => { const t = $("chatInput").value.trim(); if (t) send({ t: "chat", text: t }); $("chatInput").value = ""; $("chatBox").classList.remove("on"); };
   $("chatSend").onclick = sendChat;
@@ -656,21 +778,30 @@
   // ---------- me: moved here like a Minecraft client (collisions with the blocks), checked by the server ----------
   const me = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, sneak: false, run: false, ready: false, vy: 0, tp: -1 };
   let region = null, frozen = false, spectating = false, tickAcc = 0, jumpSent = false;
-  const PASS = n => n === "AIR" || n === "CAVE_AIR" || n === "VOID_AIR" || n === "LIGHT" || n === "WATER" || n === "LAVA" || n.endsWith("_SIGN") || n.includes("TORCH") || n.includes("BANNER") || n.includes("CARPET") || n.endsWith("_BUTTON") || n.includes("PRESSURE_PLATE") || n === "GRASS" || n === "SHORT_GRASS" || n === "TALL_GRASS";
-  function blockSolid(bx, by, bz) {
-    if (!region) return false;
+  /* The boxes a block occupies (world coordinates): full cube, its parts (stairs, slabs…), or none. */
+  function boxesAt(bx, by, bz) {
+    if (!region) return null;
     const x = bx - region.x0, y = by - region.y0, z = bz - region.z0;
-    if (x < 0 || y < 0 || z < 0 || x >= region.nx || y >= region.ny || z >= region.nz) return false;
+    if (x < 0 || y < 0 || z < 0 || x >= region.nx || y >= region.ny || z >= region.nz) return null;
     const id = region.ids[(y * region.nz + z) * region.nx + x];
-    return id !== 0 && !PASS(region.pal[id]);
+    if (!id) return null;
+    const e = region.pal[id];
+    if (FLUID(e.n) || SKIP(e.n)) return null;
+    if (e.s) return e.s.length ? e.s.map(b => [bx + b[0], by + b[1], bz + b[2], bx + b[3], by + b[4], bz + b[5]]) : null;
+    return [[bx, by, bz, bx + 1, by + 1, bz + 1]];
   }
-  function solid(x, y, z, h) {
-    for (let bx = Math.floor(x - 0.299); bx <= Math.floor(x + 0.299); bx++)
-      for (let bz = Math.floor(z - 0.299); bz <= Math.floor(z + 0.299); bz++)
-        for (let by = Math.floor(y); by <= Math.floor(y + h - 0.001); by++)
-          if (blockSolid(bx, by, bz)) return true;
-    return false;
+  /* The highest top of any box the player's box (0.6 wide, h high) at x,y,z overlaps, or -Infinity. */
+  function hit(x, y, z, h) {
+    let top = -Infinity;
+    for (let bx = Math.floor(x - 0.3); bx <= Math.floor(x + 0.3 - 1e-6); bx++)
+      for (let bz = Math.floor(z - 0.3); bz <= Math.floor(z + 0.3 - 1e-6); bz++)
+        for (let by = Math.floor(y) - 1; by <= Math.floor(y + h - 1e-6); by++) {
+          const boxes = boxesAt(bx, by, bz); if (!boxes) continue;
+          for (const b of boxes) if (b[0] < x + 0.3 && b[3] > x - 0.3 && b[2] < z + 0.3 && b[5] > z - 0.3 && b[1] < y + h && b[4] > y) top = Math.max(top, b[4]);
+        }
+    return top;
   }
+  const solid = (x, y, z, h) => hit(x, y, z, h) > -Infinity;
   /* One game tick (50 ms) of walking, falling and jumping. */
   function physicsTick() {
     const ground = solid(me.x, me.y - 0.02, me.z, 0.02);
@@ -681,12 +812,14 @@
     const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
     if (frozen) { mx = 0; mz = 0; }
     const speed = me.sneak ? 0.065 : (me.run && input.f > 0.3 ? 0.28 : 0.216);
-    let nx = me.x + mx * speed; if (solid(nx, me.y, me.z, 1.8)) nx = me.x;
-    let nz = me.z + mz * speed; if (solid(nx, me.y, nz, 1.8)) nz = me.z;
+    // Walking into something up to 0.6 high (a slab, a stair) steps up onto it, as in Minecraft.
+    const step = (tx, tz) => { const t = hit(tx, me.y, tz, 1.8); if (t === -Infinity) return me.y; if (ground && t - me.y <= 0.6 && !solid(tx, t, tz, 1.8)) return t; return null; };
+    let nx = me.x + mx * speed; let sy = step(nx, me.z); if (sy === null) nx = me.x; else me.y = sy;
+    let nz = me.z + mz * speed; sy = step(nx, nz); if (sy === null) nz = me.z; else me.y = sy;
     let ny = me.y;
     if (!ground || me.vy > 0) {
       me.vy = (me.vy - 0.08) * 0.98; ny = me.y + me.vy;
-      if (me.vy < 0 && solid(nx, ny, nz, 0.01)) { ny = Math.floor(ny) + 1; while (solid(nx, ny, nz, 0.01) && ny < me.y + 1) ny += 1; me.vy = 0; }
+      if (me.vy < 0) { const t = hit(nx, ny, nz, 0.01); if (t > -Infinity) { ny = t; me.vy = 0; } }
       else if (me.vy > 0 && solid(nx, ny, nz, 1.8)) { ny = me.y; me.vy = 0; }
     } else me.vy = 0;
     me.x = nx; me.y = ny; me.z = nz;
@@ -702,7 +835,7 @@
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
     const prev = new Map(a.d.p.map(q => [q[0], q]));
-    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", keeper: String(q[0]).startsWith("a") }; });
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, keeper: String(q[0]).startsWith("a") }; });
     const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
     return { people, ball, latest: b.d };
   }
@@ -748,7 +881,9 @@
         const swing = Math.sin(a.phase) * Math.min(1, moved * 12) * 0.9;
         a.root.position.set(px, py, pz);
         a.root.rotation.y = -yawDeg * Math.PI / 180;
+        if (a.item) { a.body.rotation.y += dt * 2; continue; }
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
+        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = k % 2 ? swing : -swing); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
         a.body.rotation.x = sneak ? 0.45 : 0; a.body.position.y = sneak ? -0.2 : 0;
         a.root.visible = !(isMe && !thirdPerson && !cam);
@@ -827,7 +962,7 @@
     el.addEventListener("pointerup", u); el.addEventListener("pointercancel", u); el.addEventListener("lostpointercapture", u);
   }
   hold($("bRight"), rightDown, rightUp);
-  hold($("bLeft"), () => act("left"));
+  hold($("bLeft"), () => act("ldown"), () => act("lup"));
   hold($("bJump"), () => { input.jump = true; });
   hold($("bSneak"), () => { me.sneak = true; sendInput(true); }, () => { me.sneak = false; sendInput(true); });
   // DEPAR is a switch: tap on, tap off (and it turns off by itself when you stop or walk backwards).
@@ -837,9 +972,9 @@
   cv.addEventListener("mousedown", e => {
     if (!playing) return;
     if (!document.pointerLockElement) { cv.requestPointerLock && cv.requestPointerLock(); return; }
-    if (e.button === 0) act("left"); else if (e.button === 2) rightDown();
+    if (e.button === 0) act("ldown"); else if (e.button === 2) rightDown();
   });
-  cv.addEventListener("mouseup", e => { if (document.pointerLockElement && e.button === 2) rightUp(); });
+  cv.addEventListener("mouseup", e => { if (!document.pointerLockElement) return; if (e.button === 2) rightUp(); else if (e.button === 0) act("lup"); });
   cv.addEventListener("contextmenu", e => e.preventDefault());
   document.addEventListener("mousemove", e => { if (document.pointerLockElement === cv) turn(e.movementX * sens * 0.5, e.movementY * sens * 0.5); });
   addEventListener("wheel", e => { if (playing && document.pointerLockElement) send({ t: "slot", i: ((held + (e.deltaY > 0 ? 1 : -1)) % 9 + 9) % 9 }); });
@@ -848,6 +983,7 @@
     if (k === "f5") { e.preventDefault(); thirdPerson = !thirdPerson; return; }
     if (k === "t" || k === "/") { e.preventDefault(); $("chatBox").classList.add("on"); $("chatInput").value = k === "/" ? "/" : ""; $("chatInput").focus(); return; }
     if (k === "escape") { send({ t: "close" }); closeOverlay(); return; }
+    if (k === "e") { if ($("overlay").classList.contains("on")) { send({ t: "close" }); closeOverlay(); } else send({ t: "inv" }); return; }
     if (/^[1-9]$/.test(k)) { send({ t: "slot", i: +k - 1 }); return; }
     if (e.repeat) return; keys.add(k);
     if (k === " ") input.jump = true;
