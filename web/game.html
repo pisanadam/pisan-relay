@@ -601,13 +601,13 @@
         break;
       case "welcome":
         clearInterval(wakeTimer); wakeStart = 0; $("loginErr").style.color = "";
-        myName = o.name; myId = o.me; playing = true; me.ready = false; snaps = [];
+        myName = o.name; myId = o.me; playing = true; me.ready = false; snaps = []; clockOff = null; hudKey = "";
         $("loginErr").textContent = ""; $("chat").innerHTML = ""; closeOverlay();
         show("game"); resize();
         break;
       case "world": lastWorld = o; buildWorld(o); break;
       case "blocks": applyBlocks(o.list); break;
-      case "s": snaps.push({ at: performance.now(), d: o }); if (snaps.length > 8) snaps.shift(); hud(o); break;
+      case "s": addSnap(o); hud(o); break;
       case "hotbar": hotbar(o); break;
       case "texts": setTexts(o.list); break;
       case "text": onText(o.kind, o.json); break;
@@ -652,7 +652,11 @@
       titleTimer = setTimeout(() => { $("title").innerHTML = ""; $("subtitle").innerHTML = ""; }, 3000);
     }
   }
+  let hudKey = "";
   function hud(o) {
+    const key = o.hp + "," + o.food + "," + o.gm + "," + o.r + "," + o.bl + "," + o.c;
+    if (key === hudKey) return;
+    hudKey = key;
     if (o.hp !== undefined && o.gm !== "creative" && o.gm !== "spectator") {
       const hearts = Math.ceil(o.hp / 2), food = Math.ceil(o.food / 2);
       $("stats").innerHTML = "<span style='color:#ff4040'>" + "♥".repeat(hearts) + "<span style='color:#444'>" + "♥".repeat(Math.max(0, 10 - hearts)) + "</span></span><span style='color:#c87a2a'>" + "<span style='color:#444'>" + "●".repeat(Math.max(0, 10 - food)) + "</span>" + "●".repeat(food) + "</span>";
@@ -845,9 +849,20 @@
   let charge = -1;
   const lerp = (a, b, t) => a + (b - a) * t;
   const lerpAngle = (a, b, t) => a + ((((b - a) % 360) + 540) % 360 - 180) * t;
+  /* States carry the relay's send time. Timing them by that, not by when they arrive, takes the network's
+     unevenness out of how others move; the delay behind grows only as much as the connection wobbles. */
+  let clockOff = null, wobble = 20;
+  function addSnap(o) {
+    const now = performance.now();
+    if (typeof o.ts !== "number") { snaps.push({ at: now, d: o }); if (snaps.length > 16) snaps.shift(); return; }
+    const off = now - o.ts;
+    if (clockOff === null || off < clockOff) clockOff = off; else clockOff += 0.02; // follows slow clock drift
+    wobble = wobble * 0.95 + (off - clockOff) * 0.05;
+    snaps.push({ at: o.ts + clockOff, d: o }); if (snaps.length > 16) snaps.shift();
+  }
   function sample() {
     if (!snaps.length) return null;
-    const now = performance.now() - 100;
+    const now = performance.now() - Math.max(55, Math.min(250, 55 + wobble * 2));
     let a = snaps[0], b = snaps[snaps.length - 1];
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
@@ -872,23 +887,27 @@
       if (mine) {
         // Server teleports (kick-off, refused steps) and the first state put us where the server says.
         if (!me.ready || st.latest.tp !== me.tp) {
-          me.x = mine[0]; me.y = mine[1]; me.z = mine[2]; me.vy = 0; me.tp = st.latest.tp;
+          me.x = mine[0]; me.y = mine[1]; me.z = mine[2]; me.vy = 0; me.tp = st.latest.tp; me.px = me.x; me.py = me.y; me.pz = me.z;
           if (!me.ready) { const self = st.latest.p.find(q => q[0] === myId); if (self) me.yaw = self[6]; }
           me.ready = true;
         }
         if (st.latest.yaw !== undefined && st.latest !== lastTurn) { lastTurn = st.latest; me.yaw = st.latest.yaw; me.pitch = st.latest.pitch; }
         if (!spectating) {
           tickAcc += dt;
-          while (tickAcc >= 0.05) { tickAcc -= 0.05; physicsTick(); sendInput(true); }
+          if (tickAcc > 0.25) tickAcc = 0.05;
+          while (tickAcc >= 0.05) { tickAcc -= 0.05; me.px = me.x; me.py = me.y; me.pz = me.z; physicsTick(); sendInput(true); }
         }
       }
+      const k = Math.min(1, tickAcc / 0.05);
+      if (me.px !== undefined) { me.rx = me.px + (me.x - me.px) * k; me.ry = me.py + (me.y - me.py) * k; me.rz = me.pz + (me.z - me.pz) * k; }
+      else { me.rx = me.x; me.ry = me.y; me.rz = me.z; }
       const seen = new Set();
       for (const p of st.people) {
         seen.add(p.id);
         let a = avatars.get(p.id);
         if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
         const isMe = p.id === myId;
-        const px = isMe ? me.x : p.x, py = isMe ? me.y : p.y, pz = isMe ? me.z : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
+        const px = isMe ? me.rx : p.x, py = isMe ? me.ry : p.y, pz = isMe ? me.rz : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
         const moved = Math.hypot(px - a.x, pz - a.z); a.x = px; a.z = pz;
         a.phase += Math.min(0.6, moved * 2.2);
         const swing = Math.sin(a.phase) * Math.min(1, moved * 12) * 0.9;
@@ -918,7 +937,7 @@
     } else {
       const yaw = me.yaw * Math.PI / 180, pitch = me.pitch * Math.PI / 180;
       const dir = new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
-      const eye = new THREE.Vector3(me.x, me.y + (me.sneak ? 1.27 : 1.62), me.z);
+      const eye = new THREE.Vector3(me.rx ?? me.x, (me.ry ?? me.y) + (me.sneak ? 1.27 : 1.62), me.rz ?? me.z);
       if (thirdPerson) { camera.position.copy(eye).addScaledVector(dir, -4); camera.position.y += 0.4; } else camera.position.copy(eye);
       camera.lookAt(eye.clone().add(dir));
     }

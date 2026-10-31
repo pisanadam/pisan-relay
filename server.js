@@ -145,7 +145,8 @@ class Session {
       this.meId = (bot.player && bot.player.uuid || "me").slice(0, 8);
       this.Block = require("prismarine-block")(bot.registry);
       this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : this.host, version: bot.version });
-      this.timer = setInterval(() => this.tick(), 50);
+      // States follow the server's ticks (the plugin's extras arrive once per tick); the timer covers other servers.
+      this.timer = setInterval(() => { if (Date.now() - (this.extrasAt || 0) > 200) this.tick(); }, 50);
       bot.world.on("blockUpdate", (old, now) => {
         if (!now || !this.box) return;
         const p = now.position, b = this.box;
@@ -166,6 +167,9 @@ class Session {
         if (e.texts) this.send({ t: "texts", list: e.texts });
         if (e.disp) { this.disp = e.disp; this.regionAt = null; }
         this.extras = e;
+        if (e.texts || e.disp) return;
+        this.extrasAt = Date.now();
+        if (this.bot && this.bot.entity && this.extrasAt - (this.tickAt || 0) >= 30) this.tick();
       } catch (x) { }
     });
     bot.on("message", (msg, position) => { if (position !== "game_info") this.send({ t: "text", kind: "chat", json: JSON.stringify(msg.json) }); });
@@ -216,6 +220,8 @@ class Session {
           bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
           bot.entity.onGround = !!o.ground;
           bot.entity.velocity.set(0, 0, 0);
+          // Straight to the server now, not on mineflayer's next 50 ms beat: a kick or a hit right after sees where you really are.
+          bot._client.write("position_look", { x: o.pos[0], y: o.pos[1], z: o.pos[2], yaw: Math.fround(fromYaw(bot.entity.yaw)), pitch: Math.fround(fromPitch(bot.entity.pitch)), onGround: !!o.ground });
         }
         break;
       }
@@ -305,7 +311,8 @@ class Session {
       }
     }
     const x = this.extras;
-    const o = { t: "s", p: people, me: [+bot.entity.position.x.toFixed(3), +bot.entity.position.y.toFixed(3), +bot.entity.position.z.toFixed(3)], tp: this.tpSeq, hp: Math.round(bot.health || 0), food: Math.round(bot.food || 0), gm: bot.game && bot.game.gameMode };
+    this.tickAt = Date.now();
+    const o = { t: "s", ts: this.tickAt, p: people, me: [+bot.entity.position.x.toFixed(3), +bot.entity.position.y.toFixed(3), +bot.entity.position.z.toFixed(3)], tp: this.tpSeq, hp: Math.round(bot.health || 0), food: Math.round(bot.food || 0), gm: bot.game && bot.game.gameMode };
     if (this.tpSent !== this.tpSeq) { this.tpSent = this.tpSeq; o.yaw = Math.round(fromYaw(bot.entity.yaw) * 10) / 10; o.pitch = Math.round(fromPitch(bot.entity.pitch) * 10) / 10; }
     if (x.b) { o.b = x.b; o.r = x.r; o.bl = x.bl; o.c = x.c; o.ph = x.ph; o.pause = x.pause; }
     if (camera) o.cam = camera;
