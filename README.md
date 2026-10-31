@@ -11,7 +11,10 @@ curl -fsSL https://raw.githubusercontent.com/pisanadam/pisan-relay/main/start.sh
 
 - `<ANAHTAR>`: eklentinin `config.yml` dosyasındaki `web-relay-key` değeri.
 - Port verilmezse `server.properties` içindeki `server-port` kullanılır. Farklı port için: `… | bash -s -- <ANAHTAR> 25570`
-- Java 11+ gerekir. Kütüphane yok; tek dosya: `PisanRelay.java`.
+- Java yoksa taşınabilir Java 17 (Eclipse Temurin) `~/pisan-relay/jre` içine bir kere indirilir; sisteme bir şey kurulmaz.
+- Köprü arka planda çalışır, shell kapansa da durmaz. Kayıtlar: `~/pisan-relay/relay.log`
+- Durdurmak: `kill $(cat ~/pisan-relay/relay.pid)` • Güncellemek/yeniden başlatmak: aynı komutu tekrar çalıştır (anahtar kayıtlıysa anahtarsız da olur).
+- Kütüphane yok; tek dosya: `PisanRelay.java`.
 
 ## Eklenti ayarı (Minecraft sunucusu)
 
