@@ -136,13 +136,27 @@ class Session {
     });
     bot.once("spawn", () => {
       this.everSpawned = true; this.connecting = false;
+      bot.physicsEnabled = false;
+      // Turn as fast as the page turns (mineflayer eases the look otherwise, so a quick turn-and-shoot aims late).
+      bot.physics.yawSpeed = 1000; bot.physics.pitchSpeed = 1000;
+      this.tpSeq = 0;
+      bot.on("forcedMove", () => { this.tpSeq++; });
       log("Girdi:", this.name, "→", this.host, bot.version);
       this.meId = (bot.player && bot.player.uuid || "me").slice(0, 8);
       this.Block = require("prismarine-block")(bot.registry);
       this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : this.host, version: bot.version });
       this.timer = setInterval(() => this.tick(), 50);
-      bot.world.on("blockUpdate", (old, now) => { if (this.regionAt && now && now.position.distanceTo(this.regionAt) < 45) this.dirty = true; });
-      bot.on("chunkColumnLoad", () => { this.dirty = true; });
+      bot.world.on("blockUpdate", (old, now) => {
+        if (!now || !this.box) return;
+        const p = now.position, b = this.box;
+        if (p.x < b.x0 || p.x > b.x1 || p.z < b.z0 || p.z > b.z1 || p.y < b.y0 || p.y >= b.y1) return;
+        (this.changes = this.changes || []).push([p.x, p.y, p.z, now.stateId]);
+      });
+      bot.on("chunkColumnLoad", c => {
+        // A chunk arriving inside the area already sent (just after joining or a teleport): send the area again, at most every 2 s.
+        const b = this.box;
+        if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
+      });
       bot.on("respawn", () => { this.regionAt = null; });
     });
     bot._client.on("custom_payload", p => {
@@ -191,13 +205,18 @@ class Session {
     const adventure = bot.game && (bot.game.gameMode === "adventure" || bot.game.gameMode === "spectator");
     switch (o.t) {
       case "in": {
-        const f = +o.f || 0, s = +o.s || 0;
-        bot.setControlState("forward", f > 0.3); bot.setControlState("back", f < -0.3);
-        bot.setControlState("right", s > 0.3); bot.setControlState("left", s < -0.3);
-        bot.setControlState("sprint", !!o.run && f > 0.3 && !o.sneak);
-        bot.setControlState("sneak", !!o.sneak);
-        if (o.jump) { bot.setControlState("jump", true); setTimeout(() => bot.setControlState("jump", false), 120); }
-        if (Number.isFinite(+o.yaw) && Number.isFinite(+o.pitch)) bot.look(toYaw(+o.yaw), toPitch(Math.max(-90, Math.min(90, +o.pitch))), true);
+        const f = +o.f || 0;
+        const sprint = !!o.run && f > 0.3 && !o.sneak;
+        if (bot.getControlState("sprint") !== sprint) bot.setControlState("sprint", sprint);
+        if (bot.getControlState("sneak") !== !!o.sneak) bot.setControlState("sneak", !!o.sneak);
+        if (Number.isFinite(+o.yaw) && Number.isFinite(+o.pitch)) { bot.entity.yaw = toYaw(+o.yaw); bot.entity.pitch = toPitch(Math.max(-90, Math.min(90, +o.pitch))); }
+        // The page moves the player (with collisions), as a Minecraft client does; the client here only reports it.
+        // After a server teleport, positions from before the page saw it are ignored.
+        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq) {
+          bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
+          bot.entity.onGround = !!o.ground;
+          bot.entity.velocity.set(0, 0, 0);
+        }
         break;
       }
       case "act": this.act(o.a, adventure); break;
@@ -254,7 +273,17 @@ class Session {
     if (!bot || !bot.entity) return;
     const camera = this.extras.cam;
     const view = camera ? new Vec3(camera[0], camera[1], camera[2]) : bot.entity.position;
-    if (!this.regionAt || this.regionAt.distanceTo(view) > 26 || (this.dirty && Date.now() - (this.regionSent || 0) > 1000)) { this.regionAt = view.clone(); this.dirty = false; this.regionSent = Date.now(); this.region(view); }
+    if (!this.regionAt || this.regionAt.distanceTo(view) > 26 || (this.dirty && Date.now() - (this.regionSent || 0) > 2000)) { this.regionAt = view.clone(); this.dirty = false; this.changes = []; this.regionSent = Date.now(); this.region(view); }
+    else if (this.changes && this.changes.length) {
+      // Single blocks that changed (dug, placed, doors): only those, with their palette entries.
+      const list = this.changes.splice(0, 400).map(([x, y, z, sid]) => {
+        const block = bot.registry.blocksByStateId[sid];
+        const name = !block || /^(air|cave_air|void_air)$/.test(block.name) ? "AIR" : block.name.toUpperCase();
+        const shape = name === "AIR" ? [] : this.shapeOf(sid);
+        return [x, y, z, shape === null ? { n: name } : { n: name, s: shape }];
+      });
+      this.send({ t: "blocks", list });
+    }
     const people = [];
     for (const e of Object.values(bot.entities)) {
       if (!e.position || e.position.distanceTo(view) > 80) continue;
@@ -276,7 +305,8 @@ class Session {
       }
     }
     const x = this.extras;
-    const o = { t: "s", p: people, me: [+bot.entity.position.x.toFixed(3), +bot.entity.position.y.toFixed(3), +bot.entity.position.z.toFixed(3)], hp: Math.round(bot.health || 0), food: Math.round(bot.food || 0), gm: bot.game && bot.game.gameMode };
+    const o = { t: "s", p: people, me: [+bot.entity.position.x.toFixed(3), +bot.entity.position.y.toFixed(3), +bot.entity.position.z.toFixed(3)], tp: this.tpSeq, hp: Math.round(bot.health || 0), food: Math.round(bot.food || 0), gm: bot.game && bot.game.gameMode };
+    if (this.tpSent !== this.tpSeq) { this.tpSent = this.tpSeq; o.yaw = Math.round(fromYaw(bot.entity.yaw) * 10) / 10; o.pitch = Math.round(fromPitch(bot.entity.pitch) * 10) / 10; }
     if (x.b) { o.b = x.b; o.r = x.r; o.bl = x.bl; o.c = x.c; o.ph = x.ph; o.pause = x.pause; }
     if (camera) o.cam = camera;
     this.send(o);
@@ -328,6 +358,7 @@ class Session {
   region(c) {
     const bot = this.bot, r = 40;
     const bx = Math.floor(c.x), bz = Math.floor(c.z), y0 = Math.floor(c.y) - 8, y1 = y0 + 24;
+    this.box = { x0: bx - r, x1: bx + r, z0: bz - r, z1: bz + r, y0, y1 };
     const palette = [{ n: "AIR", s: [] }], index = new Map();
     const runs = []; let last = -1, count = 0;
     const p = new Vec3(0, 0, 0);

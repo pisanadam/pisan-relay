@@ -347,7 +347,7 @@
   // ---------- scene ----------
   const cv = $("cv");
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#78a7ff");
   scene.fog = new THREE.Fog("#a9c6ff", 45, 120);
@@ -393,8 +393,8 @@
   function buildWorld(o) {
     clearWorld();
     const nx = o.nx, ny = o.ny, nz = o.nz, n = nx * ny * nz;
-    const ids = new Uint16Array(n); let p = 0;
-    for (const part of o.runs.split(",")) { const [id, cnt] = part.split("*"); const c = cnt ? +cnt : 1; ids.fill(+id, p, p + c); p += c; }
+    let ids = o.ids;
+    if (!ids) { ids = new Uint16Array(n); let p = 0; for (const part of o.runs.split(",")) { const [id, cnt] = part.split("*"); const c = cnt ? +cnt : 1; ids.fill(+id, p, p + c); p += c; } }
     const at = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) ? 0 : ids[(y * nz + z) * nx + x];
     const pal = o.pal.map(e => typeof e === "string" ? { n: e } : e);
     region = { ids, nx, ny, nz, x0: o.x0, y0: o.y0, z0: o.z0, pal };
@@ -605,7 +605,8 @@
         $("loginErr").textContent = ""; $("chat").innerHTML = ""; closeOverlay();
         show("game"); resize();
         break;
-      case "world": buildWorld(o); break;
+      case "world": lastWorld = o; buildWorld(o); break;
+      case "blocks": applyBlocks(o.list); break;
       case "s": snaps.push({ at: performance.now(), d: o }); if (snaps.length > 8) snaps.shift(); hud(o); break;
       case "hotbar": hotbar(o); break;
       case "texts": setTexts(o.list); break;
@@ -620,6 +621,21 @@
     if (!wakeStart) wakeStart = Date.now();
     const show = () => { $("loginErr").style.color = "#ffe36a"; $("loginErr").textContent = (text || "Sunucu başlatılıyor…") + " (" + Math.round((Date.now() - wakeStart) / 1000) + " sn)"; };
     show(); clearInterval(wakeTimer); wakeTimer = setInterval(show, 1000);
+  }
+  // Blocks that changed (dug, placed, a door opened): patch the grid and redraw, at most a few times a second.
+  let lastWorld = null, rebuildTimer = 0;
+  function applyBlocks(list) {
+    if (!region || !lastWorld) return;
+    for (const [x, y, z, entry] of list) {
+      const lx = x - region.x0, ly = y - region.y0, lz = z - region.z0;
+      if (lx < 0 || ly < 0 || lz < 0 || lx >= region.nx || ly >= region.ny || lz >= region.nz) continue;
+      let id = region.pal.findIndex(e => e.n === entry.n && JSON.stringify(e.s) === JSON.stringify(entry.s));
+      if (entry.n === "AIR") id = 0;
+      else if (id < 0) { id = region.pal.length; region.pal.push(entry); }
+      region.ids[(ly * region.nz + lz) * region.nx + lx] = id;
+    }
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(() => buildWorld({ ...lastWorld, pal: region.pal, ids: region.ids }), 120);
   }
   function chat(html) {
     const d = document.createElement("div"); d.innerHTML = html; $("chat").appendChild(d);
@@ -823,6 +839,7 @@
       else if (me.vy > 0 && solid(nx, ny, nz, 1.8)) { ny = me.y; me.vy = 0; }
     } else me.vy = 0;
     me.x = nx; me.y = ny; me.z = nz;
+    me.ground = me.vy === 0 && solid(me.x, me.y - 0.02, me.z, 0.02);
   }
   const input = { f: 0, s: 0, jump: false };
   let charge = -1;
@@ -859,10 +876,6 @@
           if (!me.ready) { const self = st.latest.p.find(q => q[0] === myId); if (self) me.yaw = self[6]; }
           me.ready = true;
         }
-        // The real Minecraft client in the relay is the one that moves; follow it smoothly.
-        const ex = mine[0] - me.x, ey = mine[1] - me.y, ez = mine[2] - me.z;
-        if (Math.hypot(ex, ez) > 3 || Math.abs(ey) > 3) { me.x = mine[0]; me.y = mine[1]; me.z = mine[2]; me.vy = 0; }
-        else { const k = Math.min(1, dt * 5); me.x += ex * k; me.z += ez * k; if (Math.abs(ey) > 0.05) me.y += ey * Math.min(1, dt * 10); }
         if (st.latest.yaw !== undefined && st.latest !== lastTurn) { lastTurn = st.latest; me.yaw = st.latest.yaw; me.pitch = st.latest.pitch; }
         if (!spectating) {
           tickAcc += dt;
@@ -923,7 +936,7 @@
     const now = performance.now();
     if (!force && now - lastSent < 50) return;
     lastSent = now;
-    send({ t: "in", f: +input.f.toFixed(2), s: +input.s.toFixed(2), yaw: +me.yaw.toFixed(1), pitch: +me.pitch.toFixed(1), run: me.run, sneak: me.sneak, jump: jumpSent, pos: [+me.x.toFixed(3), +me.y.toFixed(3), +me.z.toFixed(3)] });
+    send({ t: "in", f: +input.f.toFixed(2), s: +input.s.toFixed(2), yaw: +me.yaw.toFixed(1), pitch: +me.pitch.toFixed(1), run: me.run, sneak: me.sneak, jump: jumpSent, pos: [+me.x.toFixed(3), +me.y.toFixed(3), +me.z.toFixed(3)], ground: !!me.ground, tp: me.tp });
     jumpSent = false;
   }
   // In the background (frames paused) keep the server informed.
