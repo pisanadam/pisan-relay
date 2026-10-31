@@ -14,6 +14,8 @@ cd "$DIR"
 KEY="${1:-${RELAY_KEY:-}}"
 PORT="${2:-}"
 if [ -n "$KEY" ]; then printf '%s\n' "$KEY" > pisan-relay-key.txt; fi
+# An earlier version kept the key in the home folder.
+if [ ! -s pisan-relay-key.txt ] && [ -s "$HOME/pisan-relay-key.txt" ]; then mv "$HOME/pisan-relay-key.txt" pisan-relay-key.txt; fi
 if [ ! -s pisan-relay-key.txt ]; then
   echo "Anahtar yok. Kullanım: curl -fsSL $REPO/start.sh | bash -s -- <ANAHTAR> [PORT]" >&2
   exit 1
