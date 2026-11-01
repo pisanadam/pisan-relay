@@ -143,6 +143,8 @@ const server = http.createServer(async (req, res) => {
   if (url === "/sounds.json") { const b = await asset("minecraft/sounds.json"); return b ? send(200, "application/json", b, "max-age=86400") : send(404, "text/plain", "404"); }
   m = url.match(/^\/snd\/([a-z0-9_\/.-]{1,120})\.ogg$/);
   if (m && !m[1].includes("..")) { const b = await asset("minecraft/sounds/" + m[1] + ".ogg"); return b ? send(200, "audio/ogg", b, "max-age=604800") : send(404, "text/plain", "404"); }
+  m = url.match(/^\/skinhash\/([0-9a-f]{20,80})$/);
+  if (m) { const k = "#" + m[1]; if (!skins.has(k)) skins.set(k, await getBuffer("https://textures.minecraft.net/texture/" + m[1])); const png = skins.get(k); return png ? send(200, "image/png", png, "max-age=86400") : send(404, "text/plain", "404"); }
   m = url.match(/^\/cape\/([A-Za-z0-9_]{1,16})$/);
   if (m) { const png = await capePng(m[1]); return png ? send(200, "image/png", png, "max-age=600") : send(404, "text/plain", "404"); }
   m = url.match(/^\/skin\/(@ball|[A-Za-z0-9_]{1,16})$/);
@@ -243,6 +245,10 @@ class Session {
         if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
       });
       bot.on("respawn", () => { this.regionAt = null; });
+      bot._client.on("tile_entity_data", p => {
+        const l = p.location, b = this.box; if (!b || !l || l.x < b.x0 || l.x > b.x1 || l.z < b.z0 || l.z > b.z1 || l.y < b.y0 || l.y >= b.y1) return;
+        setTimeout(() => { const d = this.beOf(l.x, l.y, l.z); this.send({ t: "be", list: [[l.x, l.y, l.z, d]] }); }, 50);
+      });
       // Arm swings and hits on others, shown on their models as in Minecraft.
       this.anims = [];
       bot.on("entitySwingArm", e => { if (e !== bot.entity) this.anims.push([this.idOf(e), "s"]); });
@@ -414,8 +420,7 @@ class Session {
       const list = this.changes.splice(0, 400).map(([x, y, z, sid]) => {
         const block = bot.registry.blocksByStateId[sid];
         const name = !block || /^(air|cave_air|void_air)$/.test(block.name) ? "AIR" : block.name.toUpperCase();
-        const shape = name === "AIR" ? [] : this.shapeOf(sid);
-        return [x, y, z, shape === null ? { n: name } : { n: name, s: shape }];
+        return [x, y, z, name === "AIR" ? { n: "AIR", s: [] } : this.palEntry(sid, block.name), BE_DATA.test(block ? block.name : "") ? this.beOf(x, y, z) : undefined];
       });
       this.send({ t: "blocks", list });
     }
@@ -500,6 +505,32 @@ class Session {
   }
 
   /* The blocks in an 81x81x24 area around the view: a palette of block states and run-lengths. */
+  /* A palette entry: name, shape; for blocks Minecraft draws as models (chests, beds, signs…) their state too. */
+  palEntry(sid, name) {
+    const s = this.shapeOf(sid), e = s === null ? { n: name.toUpperCase() } : { n: name.toUpperCase(), s };
+    if (BE_BLOCK.test(name)) { try { e.p = this.Block.fromStateId(sid, 0).getProperties(); } catch (x) { } }
+    return e;
+  }
+  /* What a sign says, a banner's patterns, whose head a skull is. */
+  beOf(x, y, z) {
+    let be; try { const b = this.bot.blockAt(new Vec3(x, y, z)); be = b && b.blockEntity; } catch (e) { }
+    if (!be) return 0;
+    const out = {};
+    const side = t => t && { m: (t.messages || []).map(String), c: t.color || "black", g: t.has_glowing_text ? 1 : 0 };
+    if (be.front_text) { out.f = side(be.front_text); out.b = side(be.back_text); }
+    else if (be.Text1 !== undefined) out.f = { m: [be.Text1, be.Text2, be.Text3, be.Text4].map(v => String(v || "")), c: be.Color || "black", g: be.GlowingText ? 1 : 0 };
+    if (be.Patterns) out.pt = be.Patterns.map(q => [q.Pattern, q.Color]);
+    const owner = be.SkullOwner || be.profile;
+    if (owner) {
+      if (typeof owner === "string") out.o = owner;
+      else {
+        if (owner.Name || owner.name) out.o = owner.Name || owner.name;
+        try { const v = (owner.Properties || owner.properties).textures[0].Value; const url = JSON.parse(Buffer.from(v, "base64").toString()).textures.SKIN.url; out.h = url.split("/").pop(); } catch (e) { }
+      }
+    }
+    return Object.keys(out).length ? out : 0;
+  }
+
   region(c, high) {
     const bot = this.bot, r = 40;
     // A replay camera hangs well above the pitch: reach further down so the ground stays in the picture.
@@ -518,17 +549,30 @@ class Session {
           const block = bot.registry.blocksByStateId[sid];
           const name = block ? block.name : "air";
           if (name === "air" || name === "cave_air" || name === "void_air") id = 0;
-          else { id = palette.length; const s = this.shapeOf(sid); palette.push(s === null ? { n: name.toUpperCase() } : { n: name.toUpperCase(), s }); }
+          else { id = palette.length; palette.push(this.palEntry(sid, name)); }
           index.set(sid, id);
         }
       }
       if (id === last) count++; else { if (count > 0) runs.push(count === 1 ? String(last) : last + "*" + count); last = id; count = 1; }
     }
     runs.push(count === 1 ? String(last) : last + "*" + count);
-    this.send({ t: "world", x0: bx - r, y0, z0: bz - r, nx: 2 * r + 1, ny: y1 - y0, nz: 2 * r + 1, pal: palette, runs: runs.join(","), disp: this.home ? (this.disp || []) : [] });
+    // Block entity data (sign text, banner patterns, head owners) for the area.
+    const be = [];
+    palette.forEach((e, i) => { e.be = BE_DATA.test(e.n.toLowerCase()); });
+    if (palette.some(e => e.be)) {
+      const q = new Vec3(0, 0, 0);
+      for (let y = y0; y < y1; y++) for (let z = bz - r; z <= bz + r; z++) for (let x = bx - r; x <= bx + r; x++) {
+        q.x = x; q.y = y; q.z = z; const sid = bot.world.getBlockStateId(q); const id = sid && index.get(sid);
+        if (id && palette[id].be) { const d = this.beOf(x, y, z); if (d) be.push([x, y, z, d]); }
+      }
+    }
+    palette.forEach(e => { delete e.be; });
+    this.send({ t: "world", be, x0: bx - r, y0, z0: bz - r, nx: 2 * r + 1, ny: y1 - y0, nz: 2 * r + 1, pal: palette, runs: runs.join(","), disp: this.home ? (this.disp || []) : [] });
   }
 }
 
+const BE_BLOCK = /chest$|shulker_box$|_bed$|banner$|sign$|_skull$|_head$|^bell$|decorated_pot|^conduit$|^beacon$|^enchanting_table$|^lectern$/;
+const BE_DATA = /sign$|banner$|_skull$|_head$/;
 function heldName(item) { return item && item.name ? item.name : ""; }
 function offhandOf(e) { const it = (e.equipment || [])[1]; return it && it.name ? it.name : ""; }
 /* What a mob looks like beyond its kind (wool colour, horse coat, villager job, baby…), by metadata name. */

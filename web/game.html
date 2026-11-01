@@ -640,7 +640,9 @@
     }
   }
   const worldGroup = new THREE.Group(); scene.add(worldGroup);
-  function clearWorld() { worldMats.length = 0; while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); c.material && c.material.dispose && c.material.dispose(); } }
+  const BE_WORLD = /CHEST$|SHULKER_BOX$|_BED$|BANNER$|SIGN$|_SKULL$|_HEAD$|^BELL$|^DECORATED_POT$|^CONDUIT$|^BEACON$|^ENCHANTING_TABLE$|^LECTERN$/;
+  const beData = new Map(); let beBobs = [];
+  function clearWorld() { worldMats.length = 0; beMats.clear(); beBobs = []; while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); c.material && c.material.dispose && c.material.dispose(); } }
   const worldMats = []; let worldLight = 1;
 
   const TRANSPARENT = n => n.includes("GLASS") || n.endsWith("_LEAVES") || n === "ICE" || n.includes("SLIME_BLOCK") || n.includes("HONEY_BLOCK") || n === "SPAWNER" || n.endsWith("_GRATE");
@@ -686,10 +688,14 @@
     region = { ids, nx, ny, nz, x0: o.x0, y0: o.y0, z0: o.z0, pal };
     const opaqueCube = id => { if (!id) return false; const e = pal[id]; return !e.s && !SKIP(e.n) && !TRANSPARENT(e.n) && !FLUID(e.n); };
     const out = { o: { pos: [], uv: [], col: [], idx: [] }, t: { pos: [], uv: [], col: [], idx: [] }, w: { pos: [], uv: [], col: [], idx: [] } };
+    const beList = [];
+    if (o.be) { for (const [bx, by, bz, d] of o.be) beData.set(bx + "," + by + "," + bz, d); o.be = null; }
     for (let y = 0; y < ny; y++) for (let z = 0; z < nz; z++) for (let x = 0; x < nx; x++) {
       const id = ids[(y * nz + z) * nx + x]; if (!id) continue;
-      const e = pal[id], name = e.n; if (SKIP(name)) continue;
+      const e = pal[id], name = e.n;
       const wx = o.x0 + x, wy = o.y0 + y, wz = o.z0 + z;
+      if (BE_WORLD.test(name)) { beList.push([name, e.p, wx, wy, wz]); if (!/^(BEACON|ENCHANTING_TABLE|LECTERN)$/.test(name)) continue; }
+      if (SKIP(name)) continue;
       if (FLUID(name)) {
         const top = at(x, y + 1, z) === id ? 1 : 0.875;
         for (const f of FACES) {
@@ -744,6 +750,16 @@
       const m = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: t, opacity: key === "w" ? 0.7 : 1, alphaTest: key === "t" ? 0.3 : 0, side: t ? THREE.DoubleSide : THREE.FrontSide, depthWrite: key !== "w" });
       m.color.setScalar(worldLight); worldMats.push(m);
       const mesh = new THREE.Mesh(g, m); mesh.renderOrder = key === "w" ? 3 : (t ? 2 : 0); worldGroup.add(mesh);
+    }
+    // Chests, beds, banners, signs, heads…: their models in place.
+    for (const [name, props, bx, by, bz] of beList) {
+      try {
+        if (name === "BEACON") { const below = blockNameAt(bx, by - 1, bz) || ""; if (!/^(IRON|GOLD|DIAMOND|EMERALD|NETHERITE)_BLOCK$/.test(below)) continue; }
+        if (name === "LECTERN" && !(props && props.has_book === "true")) continue;
+        const model = blockEntityModel(name, props, beData.get(bx + "," + by + "," + bz));
+        model.position.set(bx, by, bz); worldGroup.add(model);
+        model.traverse(c => { if (c.userData && c.userData.bob) beBobs.push(c); });
+      } catch (err) { }
     }
   }
 
@@ -1369,6 +1385,22 @@
     };
     ar.forEach((it, i) => {
       if (!it) return;
+      const nm = it.split("#")[0];
+      // Heads and carved pumpkins on the head, elytra on the back: as Minecraft wears them.
+      if (i === 0 && /(_skull|_head)$/.test(nm) && a.slots.head) {
+        const s = a.slots.head, o = new THREE.Group(); o.position.set(s[1] * PX, (s[2] - 4) * PX, s[3] * PX); o.scale.setScalar(1.1875); s[0].add(o); a.armour.push(o);
+        headModel(o, nm.toUpperCase()); return;
+      }
+      if (i === 0 && nm === "carved_pumpkin" && a.slots.head) {
+        const s = a.slots.head, cube = new THREE.Group(); cube.position.set(s[1] * PX, s[2] * PX, s[3] * PX); cube.scale.setScalar(10 / 16 * 1.0); s[0].add(cube); a.armour.push(cube);
+        (async () => { const side = await faceCanvas("PUMPKIN", "side"), top = await faceCanvas("PUMPKIN", "top"), front = await faceCanvas("CARVED_PUMPKIN", "front"); if (!side) return; const mm = c => new THREE.MeshBasicMaterial({ map: nearestTex(c || side) }); cube.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [mm(side), mm(side), mm(top), mm(top), mm(front), mm(side)])); })();
+        return;
+      }
+      if (i === 1 && nm === "elytra" && a.slots.body) {
+        const s = a.slots.body, o = new THREE.Group(); o.position.set(s[1] * PX, (s[2] + 6) * PX, (s[3] - 2) * PX); s[0].add(o); a.armour.push(o);
+        flipParts(o, [{ at: [5, 0, 0], rot: [0.2618, 0, -0.2618], b: [[22, 0, -10, 0, 0, 10, 20, 2, 1]] }, { at: [-5, 0, 0], rot: [0.2618, 0, 0.2618], b: [[22, 0, 0, 0, 0, 10, 20, 2, 1, 1]] }], 64, 32, [texMat("entity/elytra")]);
+        return;
+      }
       const [name, col] = it.split("#"), mm = name.match(/^(leather|chainmail|iron|golden|diamond|netherite|turtle)_(helmet|chestplate|leggings|boots)$/) || (name === "turtle_helmet" ? [0, "turtle", "helmet"] : null);
       if (!mm) return;
       const mat = ARMOUR_MAT[mm[1]], tint = mm[1] === "leather" ? (col ? +col : 0xA06540) : null;
@@ -1564,6 +1596,13 @@
     (async () => {
       const alias = ITEM_ALIAS[name] || name, N = name.toUpperCase();
       let flat = null;
+      if (BE_ITEM.test(name)) {
+        const model = beItemModel(name), box = new THREE.Group(), inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(model); box.add(inner);
+        if (kind === "fp") { box.rotation.set(0, Math.PI / 4, 0); box.scale.setScalar(0.4); }
+        else if (kind === "tp") { box.position.set(0, -0.06, -0.12); box.rotation.set(75 * Math.PI / 180, Math.PI / 4, 0); box.scale.setScalar(0.3); }
+        else box.scale.setScalar(0.25);
+        grp.add(box); return;
+      }
       // A shield has no item picture in Minecraft: its face comes from the shield texture.
       if (name === "shield") {
         const sh = userPack && userPack.get("entity/shield_base_nopattern") ? await loadImg("entity/shield_base_nopattern") : null;
@@ -1685,6 +1724,7 @@
         break;
       case "world": lastWorld = o; buildWorld(o); break;
       case "blocks": applyBlocks(o.list); break;
+      case "be": for (const [x, y, z, d] of o.list) beData.set(x + "," + y + "," + z, d); if (lastWorld && region) { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(() => buildWorld({ ...lastWorld, be: null, pal: region.pal, ids: region.ids }), 120); } break;
       case "s": addSnap(o); hud(o); if (o.time !== undefined) { dayTime = o.time; dayAt = performance.now(); moonPhase = o.mp || 0; } raining = !!o.rain; break;
       case "snd": playSound(o.n, [o.x, o.y, o.z], o.v, o.p); break;
       case "blk": playSound(blockSound(o.n, o.k), [o.x, o.y, o.z], 1, 0.8); break;
@@ -1706,10 +1746,11 @@
   let lastWorld = null, rebuildTimer = 0;
   function applyBlocks(list) {
     if (!region || !lastWorld) return;
-    for (const [x, y, z, entry] of list) {
+    for (const [x, y, z, entry, data] of list) {
+      if (data !== undefined) beData.set(x + "," + y + "," + z, data);
       const lx = x - region.x0, ly = y - region.y0, lz = z - region.z0;
       if (lx < 0 || ly < 0 || lz < 0 || lx >= region.nx || ly >= region.ny || lz >= region.nz) continue;
-      let id = region.pal.findIndex(e => e.n === entry.n && JSON.stringify(e.s) === JSON.stringify(entry.s));
+      let id = region.pal.findIndex(e => e.n === entry.n && JSON.stringify(e.s) === JSON.stringify(entry.s) && JSON.stringify(e.p) === JSON.stringify(entry.p));
       if (entry.n === "AIR") id = 0;
       else if (id < 0) { id = region.pal.length; region.pal.push(entry); }
       region.ids[(ly * region.nz + lz) * region.nx + lx] = id;
@@ -1917,6 +1958,237 @@
   }
   // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
   const ITEM_ALIAS = { compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
+
+  // ---------- blocks Minecraft draws as models: chests, shulker boxes, beds, banners, signs, heads, bells, pots… ----------
+  const beMats = new Map();
+  /* A texture as a material, the pack's own (tinted when asked), lit like the world. */
+  function texMat(key, tint, opts) {
+    const k = key + "|" + (tint ?? "") + "|" + JSON.stringify(opts || {});
+    if (beMats.has(k)) return beMats.get(k);
+    const m = layeredMat([{ key, tint: tint ?? null }], 0x9a7a55, opts && opts.translucent);
+    if (opts && opts.double) m.side = THREE.DoubleSide;
+    worldMats.push(m); beMats.set(k, m); return m;
+  }
+  /* Boxes of models Minecraft draws the right way up (chests, beds, bells): pixel units, y up, block corner at 0. */
+  function beUV(geo, u, v, w, h, d, tw, th) {
+    const uvs = geo.attributes.uv;
+    const rect = (face, x0, y0, x1, y1) => { const a = [[x1, y1], [x0, y1], [x1, y0], [x0, y0]]; for (let i = 0; i < 4; i++) uvs.setXY(face * 4 + i, a[i][0] / tw, 1 - a[i][1] / th); };
+    rect(0, u + d + w, v + d, u + d + w + d, v + d + h);
+    rect(1, u, v + d, u + d, v + d + h);
+    rect(2, u + d + w, v + d, u + d + w + w, v);
+    rect(3, u + d, v, u + d + w, v + d);
+    rect(4, u + 2 * d + w, v + d, u + 2 * d + 2 * w, v + d + h);
+    rect(5, u + d, v + d, u + d + w, v + d + h);
+    uvs.needsUpdate = true;
+  }
+  function beBox(g, mat, tw, th, u, v, x0, y0, z0, w, h, d, inf) {
+    inf = inf || 0;
+    const geo = new THREE.BoxGeometry(Math.max(0.02, w + 2 * inf) * PX, Math.max(0.02, h + 2 * inf) * PX, Math.max(0.02, d + 2 * inf) * PX);
+    beUV(geo, u, v, w, h, d, tw, th);
+    const m = new THREE.Mesh(geo, mat); m.position.set((x0 + w / 2) * PX, (y0 + h / 2) * PX, (z0 + d / 2) * PX); g.add(m); return m;
+  }
+  /* Boxes of models drawn upside down like creatures (shulker boxes, banners, signs, heads): Minecraft's numbers. */
+  function flipParts(g, parts, tw, th, mats) {
+    const made = {};
+    for (const part of parts) {
+      const grp = new THREE.Group(); grp.position.set(part.at[0] * PX, -part.at[1] * PX, -part.at[2] * PX);
+      if (part.rot) { grp.rotation.order = "ZYX"; grp.rotation.set(part.rot[0], -part.rot[1], -part.rot[2]); }
+      for (const b of part.b) {
+        const [u, v, x0, y0, z0, w, h, d, inf = 0, mir = 0, mi = 0] = b;
+        const geo = new THREE.BoxGeometry(Math.max(0.02, w + 2 * inf) * PX, Math.max(0.02, h + 2 * inf) * PX, Math.max(0.02, d + 2 * inf) * PX);
+        boxUV(geo, u, v, w, h, d, tw, th, !!mir);
+        const m = new THREE.Mesh(geo, mats[mi] || mats[0]); m.position.set((x0 + w / 2) * PX, -(y0 + h / 2) * PX, -(z0 + d / 2) * PX); grp.add(m);
+      }
+      (part.parent && made[part.parent] ? made[part.parent] : g).add(grp); made[part.n || Math.random()] = grp;
+    }
+    return made;
+  }
+  const FACING_DEG = { south: 0, west: 90, north: 180, east: 270 };
+  const WOODS = /^(OAK|SPRUCE|BIRCH|JUNGLE|ACACIA|DARK_OAK|MANGROVE|CHERRY|BAMBOO|CRIMSON|WARPED)/;
+  const BANNER_CODES = { b: "base", bl: "square_bottom_left", br: "square_bottom_right", tl: "square_top_left", tr: "square_top_right", bs: "stripe_bottom", ts: "stripe_top", ls: "stripe_left", rs: "stripe_right", cs: "stripe_center", ms: "stripe_middle", drs: "stripe_downright", dls: "stripe_downleft", ss: "small_stripes", cr: "cross", sc: "straight_cross", bt: "triangle_bottom", tt: "triangle_top", bts: "triangles_bottom", tts: "triangles_top", ld: "diagonal_left", rd: "diagonal_up_right", lud: "diagonal_up_left", rud: "diagonal_right", mc: "circle", mr: "rhombus", vh: "half_vertical", hh: "half_horizontal", vhr: "half_vertical_right", hhb: "half_horizontal_bottom", bo: "border", cbo: "curly_border", gra: "gradient", gru: "gradient_up", bri: "bricks", glb: "globe", cre: "creeper", sku: "skull", flo: "flower", moj: "mojang", pig: "piglin" };
+  const SIGN_TEXT = { white: "#ffffff", orange: "#ff681f", magenta: "#ff00ff", light_blue: "#9ac0cd", yellow: "#ffff00", lime: "#bfff00", pink: "#ff69b4", gray: "#808080", light_gray: "#d3d3d3", cyan: "#00ffff", purple: "#a020f0", blue: "#0000ff", brown: "#8b4513", green: "#00ff00", red: "#ff0000", black: "#000000" };
+  const dyeOf = n => { const m = n.match(/^(WHITE|ORANGE|MAGENTA|LIGHT_BLUE|YELLOW|LIME|PINK|GRAY|LIGHT_GRAY|CYAN|PURPLE|BLUE|BROWN|GREEN|RED|BLACK)_/); return m ? m[1].toLowerCase() : null; };
+  /* A JSON text component (or plain text) as coloured runs. */
+  function jsonRuns(text, base) {
+    let c; try { c = JSON.parse(text); } catch (e) { return runsOf(String(text || ""), base); }
+    const out = [];
+    const walk = (x, col, bold) => {
+      if (x == null) return;
+      if (typeof x === "string") { out.push(...runsOf(x, col)); return; }
+      if (Array.isArray(x)) { x.forEach(y => walk(y, col, bold)); return; }
+      const cc = x.color ? (x.color.startsWith("#") ? x.color : CODES[NAMED[x.color]] || col) : col, bb = x.bold ?? bold;
+      if (x.text) out.push(...runsOf(x.text, cc).map(r => ({ ...r, b: r.b || !!bb })));
+      if (x.translate) out.push({ t: x.translate, c: cc, b: !!bb });
+      (x.extra || []).forEach(y => walk(y, cc, bb));
+    };
+    walk(c, base, false); return out;
+  }
+  /* Sign text drawn as Minecraft does: up to four centred lines, 10 font pixels apart. */
+  function signText(side, w, h, lineH) {
+    const K = 4, c = document.createElement("canvas"); c.width = w * K; c.height = h * K; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+    const col = SIGN_TEXT[side.c] || "#000000", lines = side.m.map(t => jsonRuns(t, col)), n = lines.length;
+    const t = document.createElement("canvas"); t.width = w; t.height = h; const tg = t.getContext("2d");
+    lines.forEach((runs, i) => {
+      if (!runs.length) return;
+      const top = Math.round(h / 2 + i * lineH - n * lineH / 2);
+      if (mcFont) { const rw = runsWidth(runs); drawRuns(tg, runs, Math.round((w - rw) / 2), top, side.g === 1); }
+      else { tg.font = "8px monospace"; tg.textAlign = "center"; tg.textBaseline = "top"; tg.fillStyle = runs[0].c; tg.fillText(runs.map(r => r.t).join(""), w / 2, top); }
+    });
+    g.drawImage(t, 0, 0, c.width, c.height);
+    const m = new THREE.MeshBasicMaterial({ map: nearestTex(c), transparent: true, alphaTest: 0.1 });
+    m.color.setScalar(side.g === 1 ? 1 : worldLight); if (side.g !== 1) worldMats.push(m);
+    return m;
+  }
+  /* One block entity as a model in its block (0..1), turned and placed by its state. */
+  function blockEntityModel(name, props, data) {
+    const g = new THREE.Group(), n = name, pr = props || {};
+    const turn = deg => { const o = new THREE.Group(); o.position.set(0.5, 0, 0.5); const r = new THREE.Group(); r.rotation.y = -deg * Math.PI / 180; o.add(r); const back = new THREE.Group(); back.position.set(-0.5, 0, -0.5); r.add(back); g.add(o); return back; };
+    let m;
+    if (/CHEST$/.test(n)) {
+      const t = pr.type || "single", kind = n === "ENDER_CHEST" ? "ender" : n === "TRAPPED_CHEST" ? "trapped" : "normal";
+      const tex = texMat("entity/chest/" + kind + (t !== "single" && kind !== "ender" ? "_" + t : ""));
+      const b = turn(FACING_DEG[pr.facing] ?? 0);
+      if (t === "left") { beBox(b, tex, 64, 64, 0, 19, 1, 0, 1, 15, 10, 14); beBox(b, tex, 64, 64, 0, 0, 1, 9, 1, 15, 5, 14); beBox(b, tex, 64, 64, 0, 0, 15, 7, 15, 1, 4, 1); }
+      else if (t === "right") { beBox(b, tex, 64, 64, 0, 19, 0, 0, 1, 15, 10, 14); beBox(b, tex, 64, 64, 0, 0, 0, 9, 1, 15, 5, 14); beBox(b, tex, 64, 64, 0, 0, 0, 7, 15, 1, 4, 1); }
+      else { beBox(b, tex, 64, 64, 0, 19, 1, 0, 1, 14, 10, 14); beBox(b, tex, 64, 64, 0, 0, 1, 9, 1, 14, 5, 14); beBox(b, tex, 64, 64, 0, 0, 7, 7, 15, 2, 4, 1); }
+    } else if (/SHULKER_BOX$/.test(n)) {
+      const dye = dyeOf(n), tex = texMat("entity/shulker/shulker" + (dye ? "_" + dye : ""));
+      // Pointing up by default; other facings tip it over.
+      const o = new THREE.Group(); o.position.set(0.5, 0.5, 0.5); g.add(o);
+      const f = pr.facing || "up", rot = { up: [0, 0], down: [Math.PI, 0], north: [-Math.PI / 2, 0], south: [Math.PI / 2, 0], west: [0, Math.PI / 2], east: [0, -Math.PI / 2] }[f] || [0, 0];
+      o.rotation.set(rot[0], 0, rot[1]);
+      const inner = new THREE.Group(); inner.position.y = 1 - 0.5; o.add(inner);
+      flipParts(inner, [{ at: [0, 8, 0], b: [[0, 28, -8, -8, -8, 16, 8, 16], [0, 0, -8, -16, -8, 16, 12, 16]] }], 64, 64, [tex]);
+    } else if (/_BED$/.test(n)) {
+      const tex = texMat("entity/bed/" + (dyeOf(n) || "red")), head = pr.part === "head";
+      const a = new THREE.Group(); a.position.set(0, 9 / 16, 0); g.add(a);
+      const r1 = new THREE.Group(); r1.rotation.x = Math.PI / 2; a.add(r1);
+      const t1 = new THREE.Group(); t1.position.set(0.5, 0.5, 0.5); r1.add(t1);
+      const r2 = new THREE.Group(); r2.rotation.z = (180 + (FACING_DEG[pr.facing] ?? 0)) * Math.PI / 180; t1.add(r2);
+      const b = new THREE.Group(); b.position.set(-0.5, -0.5, -0.5); r2.add(b);
+      beBox(b, tex, 64, 64, 0, head ? 0 : 22, 0, 0, 0, 16, 16, 6);
+      const leg = (u, v, x, y, z, rx, rz) => { const lg = new THREE.Group(); lg.rotation.order = "ZYX"; lg.rotation.set(rx, 0, rz); b.add(lg); beBox(lg, tex, 64, 64, u, v, x, y, z, 3, 3, 3); };
+      if (head) { leg(50, 6, 0, 6, 0, Math.PI / 2, Math.PI / 2); leg(50, 18, -16, 6, 0, Math.PI / 2, Math.PI); }
+      else { leg(50, 0, 0, 6, -16, Math.PI / 2, 0); leg(50, 12, -16, 6, -16, Math.PI / 2, 3 * Math.PI / 2); }
+    } else if (/BANNER$/.test(n)) {
+      const wall = n.includes("WALL_"), base = dyeOf(n.replace("WALL_", "")) || "white";
+      const layers = [{ key: "entity/banner/base", tint: DYE_RGB[DYES.indexOf(base)] }];
+      for (const [code, colr] of (data && data.pt) || []) if (BANNER_CODES[code]) layers.push({ key: "entity/banner/" + BANNER_CODES[code], tint: DYE_RGB[colr] });
+      const flagMat = layeredMat(layers, 0xffffff); worldMats.push(flagMat);
+      const poleMat = texMat("entity/banner_base");
+      const o = new THREE.Group(); g.add(o);
+      if (!wall) { o.position.set(0.5, 0.5, 0.5); o.rotation.y = -(+pr.rotation || 0) * 22.5 * Math.PI / 180; }
+      else { o.position.set(0.5, -1 / 6, 0.5); o.rotation.y = -(FACING_DEG[pr.facing] ?? 0) * Math.PI / 180; }
+      const s2 = new THREE.Group(); if (wall) s2.position.set(0, -0.3125, -0.4375); s2.scale.setScalar(2 / 3); o.add(s2);
+      const parts = [{ at: [0, -32, 0], rot: [-0.0125 * Math.PI, 0, 0], b: [[0, 0, -10, 0, -2, 20, 40, 1, 0, 0, 1]] }, { at: [0, 0, 0], b: [[0, 42, -10, -32, -1, 20, 2, 2]] }];
+      if (!wall) parts.push({ at: [0, 0, 0], b: [[44, 0, -1, -30, -1, 2, 42, 2]] });
+      flipParts(s2, parts, 64, 64, [poleMat, flagMat]);
+    } else if (/SIGN$/.test(n)) {
+      const hanging = n.includes("HANGING"), wall = n.includes("WALL_"), wood = (n.match(WOODS) || ["OAK"])[0].toLowerCase();
+      const tex = texMat("entity/signs/" + (hanging ? "hanging/" : "") + wood);
+      const o = new THREE.Group(); g.add(o);
+      const deg = wall ? (FACING_DEG[pr.facing] ?? 0) : (+pr.rotation || 0) * 22.5;
+      o.position.set(0.5, hanging ? 0.625 : 0.5, 0.5); o.rotation.y = -deg * Math.PI / 180;
+      const body = new THREE.Group(); o.add(body);
+      if (hanging) {
+        if (wall) body.position.z = 0;
+        flipParts(body, [{ at: [0, 0, 0], b: [[0, 12, -7, 0, -1, 14, 10, 2]] }, { at: [0, 0, 0], b: [[14, 6, -6, -6, 0, 12, 6, 0]] }], 64, 32, [tex]);
+        const text = (side, z, flip) => { if (!side || !side.m.some(t => jsonRuns(t).length)) return; const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.875, 0.625), signText(side, 84, 60, 9)); pl.position.set(0, -0.3125, z); if (flip) pl.rotation.y = Math.PI; body.add(pl); };
+        text(data && data.f, 0.07, false); text(data && data.b, -0.07, true);
+      } else {
+        if (wall) body.position.set(0, -0.3125, -0.4375);
+        const sc = new THREE.Group(); sc.scale.setScalar(2 / 3); body.add(sc);
+        const parts = [{ at: [0, 0, 0], b: [[0, 0, -12, -14, -1, 24, 12, 2]] }]; if (!wall) parts.push({ at: [0, 0, 0], b: [[0, 14, -1, -2, -1, 2, 14, 2]] });
+        flipParts(sc, parts, 64, 32, [tex]);
+        const text = (side, z, flip) => { if (!side || !side.m.some(t => jsonRuns(t).length)) return; const pl = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.5), signText(side, 96, 48, 10)); pl.position.set(0, 1 / 3, z); if (flip) pl.rotation.y = Math.PI; body.add(pl); };
+        text(data && data.f, 0.0467 + 0.001, false); text(data && data.b, -0.0467 - 0.001, true);
+      }
+    } else if (/_SKULL$|_HEAD$/.test(n)) {
+      const wall = n.includes("_WALL_"), kind = n.replace("_WALL", "");
+      const o = new THREE.Group(); g.add(o);
+      if (wall) { const d = { north: [0, -1], south: [0, 1], west: [-1, 0], east: [1, 0] }[pr.facing] || [0, 1]; o.position.set(0.5 - d[0] * 0.25, 0.25, 0.5 - d[1] * 0.25); o.rotation.y = -(FACING_DEG[pr.facing] ?? 0) * Math.PI / 180; }
+      else { o.position.set(0.5, 0, 0.5); o.rotation.y = -(+pr.rotation || 0) * 22.5 * Math.PI / 180; }
+      headModel(o, kind, data);
+    } else if (n === "BELL") {
+      const tex = texMat("entity/bell/bell_body"), b = turn((FACING_DEG[pr.facing] ?? 0));
+      beBox(b, tex, 32, 32, 0, 0, 5, 6, 5, 6, 7, 6); beBox(b, tex, 32, 32, 0, 13, 4, 4, 4, 8, 2, 8);
+      const plank = texMat("dark_oak_planks"), stone = texMat("stone"), at = pr.attachment || "floor";
+      const cube = (mat, x, y, z, w, h, d) => { const mm = new THREE.Mesh(new THREE.BoxGeometry(w * PX, h * PX, d * PX), mat); mm.position.set((x + w / 2) * PX, (y + h / 2) * PX, (z + d / 2) * PX); b.add(mm); };
+      if (at === "floor") { cube(stone, 2, 0, 6, 2, 16, 4); cube(stone, 12, 0, 6, 2, 16, 4); cube(plank, 4, 12, 7, 8, 2, 2); }
+      else if (at === "ceiling") cube(plank, 7, 13, 7, 2, 3, 2);
+      else if (at === "single_wall") cube(plank, 7, 13, 2, 2, 2, 13);
+      else cube(plank, 7, 13, 0, 2, 2, 16);
+    } else if (n === "DECORATED_POT") {
+      const side = texMat("entity/decorated_pot/decorated_pot_side"), base = texMat("entity/decorated_pot/decorated_pot_base");
+      const b = turn(FACING_DEG[pr.facing] ?? 0);
+      const body = new THREE.Mesh(new THREE.BoxGeometry(14 * PX, 16 * PX, 14 * PX), [side, side, base, base, side, side]); body.position.set(0.5, 0.5, 0.5); b.add(body);
+      beBox(b, base, 32, 32, 0, 0, 4, 16, 4, 8, 3, 8, -0.1); beBox(b, base, 32, 32, 0, 5, 5, 19, 5, 6, 1, 6, 0.2);
+    } else if (n === "CONDUIT") {
+      const tex = texMat("entity/conduit/base"); beBox(g, tex, 32, 16, 0, 0, 5, 5, 5, 6, 6, 6);
+    } else if (n === "BEACON") {
+      // The beam, when the beacon stands on a mineral block.
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 256, 0.4), texMat("entity/beacon_beam", null, { translucent: true, double: true }));
+      beam.position.set(0.5, 1 + 128, 0.5); g.add(beam);
+    } else if (n === "ENCHANTING_TABLE" || n === "LECTERN") {
+      const tex = texMat("entity/enchanting_table_book"), o = new THREE.Group(); g.add(o);
+      if (n === "ENCHANTING_TABLE") { o.position.set(0.5, 0.95, 0.5); o.userData.bob = true; } else { o.position.set(0.5, 1.07, 0.5); o.rotation.set(0, -(FACING_DEG[pr.facing] ?? 0) * Math.PI / 180 + Math.PI / 2, -67.5 * Math.PI / 180); }
+      flipParts(o, [{ at: [0, 0, 0], rot: [0, -0.9, 0], b: [[0, 0, -6, -5, -0.005, 6, 10, 0.005], [0, 10, -5, -4, -1, 5, 8, 1]] }, { at: [0, 0, 0], rot: [0, 0.9, 0], b: [[16, 0, 0, -5, -0.005, 6, 10, 0.005], [12, 10, 0, -4, -1, 5, 8, 1]] }, { at: [0, 0, 0], b: [[12, 0, -1, -5, 0, 2, 10, 0.005]] }], 64, 32, [tex]);
+    }
+    return g;
+  }
+  /* A head as worn, placed or held: the mob's own head from its texture (a player's from their skin). */
+  function headModel(o, kind, data) {
+    const k = kind.replace(/_WALL/, "");
+    if (k === "PLAYER_HEAD") {
+      const skin = data && data.h ? "/skinhash/" + data.h : data && data.o ? "/skin/" + encodeURIComponent(data.o) : null;
+      const mat = new THREE.MeshBasicMaterial({ color: 0xc58c69, transparent: true, alphaTest: 0.5 }); worldMats.push(mat);
+      if (skin) { const img = new Image(); img.onload = () => { const c = document.createElement("canvas"); c.width = c.height = 64; c.getContext("2d").drawImage(img, 0, 0); mat.map = nearestTex(c); mat.color.setScalar(worldLight); mat.needsUpdate = true; }; img.src = skin; }
+      else { const s = skinTexture("", -1); mat.map = s.tex; mat.color.setScalar(worldLight); }
+      flipParts(o, [{ at: [0, 0, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8], [32, 0, -4, -8, -4, 8, 8, 8, 0.25]] }], 64, 64, [mat]);
+      return;
+    }
+    const T = { SKELETON_SKULL: ["entity/skeleton/skeleton", 64, 32], WITHER_SKELETON_SKULL: ["entity/skeleton/wither_skeleton", 64, 32], ZOMBIE_HEAD: ["entity/zombie/zombie", 64, 64], CREEPER_HEAD: ["entity/creeper/creeper", 64, 32], PIGLIN_HEAD: ["entity/piglin/piglin", 64, 64], DRAGON_HEAD: ["entity/enderdragon/dragon", 256, 256] }[k];
+    if (!T) return;
+    const mat = texMat(T[0]);
+    if (k === "PIGLIN_HEAD") flipParts(o, [{ n: "h", at: [0, 0, 0], b: [[0, 0, -5, -8, -4, 10, 8, 8], [31, 1, -2, -4, -5, 4, 4, 1], [2, 4, 2, -2, -5, 1, 2, 1], [2, 0, -3, -2, -5, 1, 2, 1]] }, { parent: "h", at: [4.5, -6, 0], rot: [0, 0, -0.5236], b: [[51, 6, 0, 0, -2, 1, 5, 4]] }, { parent: "h", at: [-4.5, -6, 0], rot: [0, 0, 0.5236], b: [[39, 6, -1, 0, -2, 1, 5, 4]] }], 64, 64, [mat]);
+    else if (k === "DRAGON_HEAD") { const s = new THREE.Group(); s.scale.setScalar(0.75); s.position.y = 0.25; o.add(s); flipParts(s, [{ at: [0, 0, 0], b: [[176, 44, -6, -1, -24, 12, 5, 16], [112, 30, -8, -8, -10, 16, 16, 16], [0, 0, -5, -12, -4, 2, 4, 6, 0, 1], [112, 0, -5, -3, -22, 2, 2, 4, 0, 1], [0, 0, 3, -12, -4, 2, 4, 6], [112, 0, 3, -3, -22, 2, 2, 4]] }, { at: [0, 4, -8], b: [[176, 65, -6, 0, -16, 12, 4, 16]] }], 256, 256, [mat]); }
+    else flipParts(o, [{ at: [0, 0, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8], ...(T[2] === 64 ? [[32, 0, -4, -8, -4, 8, 8, 8, 0.25]] : [])] }], T[1], T[2], [mat]);
+  }
+  /* Items that are these models in the hand and the inventory. */
+  const BE_ITEM = /^(chest|trapped_chest|ender_chest|([a-z_]+_)?shulker_box|[a-z_]+_bed|[a-z_]+_banner|skeleton_skull|wither_skeleton_skull|zombie_head|creeper_head|piglin_head|dragon_head|decorated_pot|conduit)$/;
+  function beItemModel(name) {
+    const N = name.toUpperCase();
+    if (/_BED$/.test(N)) {
+      // A bed item shows both halves side by side.
+      const g = new THREE.Group(); const h = blockEntityModel(N, { part: "head", facing: "south" }); h.position.z = 0.5; g.add(h);
+      const f = blockEntityModel(N, { part: "foot", facing: "south" }); f.position.z = -0.5; g.add(f); return g;
+    }
+    if (/_SKULL$|_HEAD$/.test(N)) { const g = new THREE.Group(); const o = new THREE.Group(); o.position.set(0.5, 0.25, 0.5); o.scale.setScalar(1.5); g.add(o); headModel(o, N); return g; }
+    return blockEntityModel(N, { facing: "south", type: "single", rotation: "0" });
+  }
+  // Inventory icons of these models, drawn once with a small renderer of their own.
+  let iconRenderer = null, iconScene = null, iconCam = null, iconQueue = Promise.resolve();
+  // One at a time: each icon is drawn alone.
+  function modelIcon(name) { const job = iconQueue.then(() => drawModelIcon(name)); iconQueue = job.catch(() => null); return job; }
+  function drawModelIcon(name) {
+    try {
+      if (!iconRenderer) {
+        const c = document.createElement("canvas"); c.width = c.height = 64;
+        iconRenderer = new THREE.WebGLRenderer({ canvas: c, alpha: true, antialias: false, preserveDrawingBuffer: true });
+        iconScene = new THREE.Scene(); iconCam = new THREE.OrthographicCamera(-0.9, 0.9, 0.9, -0.9, 0.1, 10);
+        iconCam.position.set(2, 1.6, 2); iconCam.lookAt(0, 0, 0);
+      }
+      const m = beItemModel(name), holder = new THREE.Group(); const inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(m); holder.add(inner);
+      if (/_bed$/.test(name)) holder.scale.setScalar(0.62);
+      if (/banner$/.test(name)) { holder.scale.setScalar(0.62); holder.rotation.y = Math.PI / 4; holder.position.y = -0.55; }
+      iconScene.add(holder);
+      return new Promise(res => setTimeout(() => {
+        iconRenderer.setClearColor(0, 0); iconRenderer.clear(); iconRenderer.render(iconScene, iconCam);
+        const out = document.createElement("canvas"); out.width = out.height = 64; out.getContext("2d").drawImage(iconRenderer.domElement, 0, 0);
+        iconScene.remove(holder); res(out);
+      }, 350));
+    } catch (e) { return Promise.resolve(null); }
+  }
   /* Item icons as Minecraft draws them: flat items from the item textures, blocks as little 3D cubes. */
   const iconCache = new Map();
   const FLAT_BLOCK = n => PLANT(n) || /TORCH|RAIL|LADDER|_PANE$|IRON_BARS|_DOOR$|LEVER|TRIPWIRE|REDSTONE_WIRE|_SIGN$|_BANNER$|LANTERN$|CHAIN$|_CANDLE$|^CANDLE$|SCAFFOLDING|_BUTTON$|_CARPET$|_PRESSURE_PLATE$|^COBWEB$|POINTED_DRIPSTONE|AMETHYST_BUD|AMETHYST_CLUSTER|HOPPER$|CAULDRON$|BELL$|_HEAD$|_SKULL$/.test(n);
@@ -1924,6 +2196,8 @@
     if (iconCache.has(m)) return iconCache.get(m);
     const pr = (async () => {
       const name = ITEM_ALIAS[m] || m;
+      if (BE_ITEM.test(m)) return modelIcon(m);
+      if (m === "shield") { const sh = userPack && userPack.get("entity/shield_base_nopattern") ? await loadImg("entity/shield_base_nopattern") : null; if (sh) { const k = sh.width / 64, c2 = document.createElement("canvas"); c2.width = c2.height = 24; const g2 = c2.getContext("2d"); g2.imageSmoothingEnabled = false; g2.drawImage(sh, k, k, 12 * k, 22 * k, 6, 1, 12, 22); return c2; } }
       const c = document.createElement("canvas"); const g = c.getContext("2d");
       const flat = await loadImg("item/" + name);
       if (flat) { c.width = c.height = 16; g.imageSmoothingEnabled = false; g.drawImage(flat, 0, 0, flat.width, flat.width, 0, 0, 16, 16); return c; }
@@ -2328,6 +2602,9 @@
   let clockOff = null, wobble = 20;
   function addSnap(o) {
     const now = performance.now();
+    // A teleport that also turns us (kick-off facing the goal): take the new look the moment it arrives,
+    // not through the smoothing, which can skip the one state that carries it.
+    if (o.yaw !== undefined) { me.yaw = o.yaw; me.pitch = o.pitch; }
     if (typeof o.ts !== "number") { snaps.push({ at: now, d: o }); if (snaps.length > 16) snaps.shift(); return; }
     const off = now - o.ts;
     if (clockOff === null || off < clockOff) clockOff = off; else clockOff += 0.02; // follows slow clock drift
@@ -2371,7 +2648,7 @@
           if (!me.ready) { const self = st.latest.p.find(q => q[0] === myId); if (self) me.yaw = self[6]; }
           me.ready = true;
         }
-        if (st.latest.yaw !== undefined && st.latest !== lastTurn) { lastTurn = st.latest; me.yaw = st.latest.yaw; me.pitch = st.latest.pitch; }
+
         if (!spectating) {
           tickAcc += dt;
           if (tickAcc > 0.25) tickAcc = 0.05;
@@ -2454,7 +2731,8 @@
     const xp = $("xp");
     if (charge >= 0) { const p = Math.min(1, (performance.now() - charge) / 1200); xp.firstChild.style.width = (p * 100) + "%"; xp.classList.toggle("power", p >= 1); }
     else { xp.firstChild.style.width = "0"; xp.classList.remove("power"); }
-    stepAnims(); updateSky(now); if (me.ready) footsteps();
+    stepAnims(); updateSky(now);
+    for (const b of beBobs) { b.position.y = 0.95 + Math.sin(now / 500) * 0.05; b.rotation.y = now / 2000; } if (me.ready) footsteps();
     renderer.render(skyScene, skyCam);
     renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
     if (!thirdPerson && !cam && me.ready) {
