@@ -1774,7 +1774,8 @@
       case "blocks": applyBlocks(o.list); break;
       case "be": for (const [x, y, z, d] of o.list) beData.set(x + "," + y + "," + z, d); if (lastWorld && region) { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(() => region && buildWorld({ ...lastWorld, be: null, pal: region.pal, ids: region.ids }), 120); } break;
       case "s": if (o.fx) effects = o.fx; else if (effects.s || effects.sl || effects.j || effects.sf || effects.lev) effects = { s: 0, sl: 0, j: 0, sf: 0, lev: 0 }; addSnap(o); hud(o); if (o.time !== undefined) { dayTime = o.time; dayAt = performance.now(); moonPhase = o.mp || 0; } raining = !!o.rain; break;
-      case "vel": me.vx = o.v[0]; me.vy = o.v[1]; me.vz = o.v[2]; break;
+      case "vel": if (o.add) { me.vx += o.v[0]; me.vy += o.v[1]; me.vz += o.v[2]; } else { me.vx = o.v[0]; me.vy = o.v[1]; me.vz = o.v[2]; } break; // knockback sets, an explosion adds
+      case "tx": send({ t: "pong", id: o.id }); break; // answered after everything before it has been taken in
       case "noworld": region = null; break; // another world: stand still until its ground arrives
       case "snd": playSound(o.n, [o.x, o.y, o.z], o.v, o.p); break;
       case "blk": playSound(blockSound(o.n, o.k), [o.x, o.y, o.z], 1, 0.8); break;
@@ -2680,8 +2681,6 @@
      keeps you on edges, ladders hold you, cobwebs and soul sand slow you, knockback pushes you, potions count. */
   const FLUIDS_W = /^(WATER|BUBBLE_COLUMN|KELP|KELP_PLANT|SEAGRASS|TALL_SEAGRASS)$/;
   const CLIMB = /LADDER|^VINE$|SCAFFOLDING|TWISTING_VINES|WEEPING_VINES|CAVE_VINES/;
-  const SLIP = n => /^(ICE|PACKED_ICE|FROSTED_ICE)$/.test(n) ? 0.98 : n === "BLUE_ICE" ? 0.989 : n === "SLIME_BLOCK" ? 0.8 : 0.6;
-  const SPEEDF = n => /^(SOUL_SAND|HONEY_BLOCK)$/.test(n) ? 0.4 : 1;
   const USABLE = /^(bow|crossbow|trident|shield|spyglass|goat_horn|potion|milk_bucket|honey_bottle|apple|bread|cookie|melon_slice|carrot|potato|baked_potato|poisonous_potato|beetroot|beef|cooked_beef|porkchop|cooked_porkchop|chicken|cooked_chicken|mutton|cooked_mutton|rabbit|cooked_rabbit|cod|cooked_cod|salmon|cooked_salmon|tropical_fish|pufferfish|pumpkin_pie|golden_apple|enchanted_golden_apple|golden_carrot|sweet_berries|glow_berries|dried_kelp|mushroom_stew|rabbit_stew|beetroot_soup|suspicious_stew|chorus_fruit|rotten_flesh|spider_eye)$/;
   let rightHeld = false, effects = { s: 0, sl: 0, j: 0, sf: 0, lev: 0 };
   function usingItem() {
@@ -2700,96 +2699,153 @@
   }
   /* How far the box can go along one axis before it touches a block (Minecraft's Shapes.collide). */
   function sweep(axis, d, bb, boxes) {
-    if (!d) return 0;
+    if (Math.abs(d) < 1e-7) return 0;
     const o1 = (axis + 1) % 3, o2 = (axis + 2) % 3;
     for (const b of boxes) {
       if (b[o1] >= bb[o1 + 3] - 1e-7 || b[o1 + 3] <= bb[o1] + 1e-7 || b[o2] >= bb[o2 + 3] - 1e-7 || b[o2 + 3] <= bb[o2] + 1e-7) continue;
       if (d > 0 && b[axis] >= bb[axis + 3] - 1e-7) d = Math.min(d, b[axis] - bb[axis + 3]);
       else if (d < 0 && b[axis + 3] <= bb[axis] + 1e-7) d = Math.max(d, b[axis + 3] - bb[axis]);
     }
-    return d;
+    return Math.abs(d) < 1e-7 ? 0 : d;
   }
   const shift = (bb, axis, d) => { bb[axis] += d; bb[axis + 3] += d; };
-  function collideMove(dx, dy, dz, h, ground) {
-    const bb = aabbAt(me.x, me.y, me.z, h);
-    const area = [Math.min(bb[0], bb[0] + dx) - 0.01, Math.min(bb[1], bb[1] + dy) - 0.01, Math.min(bb[2], bb[2] + dz) - 0.01, Math.max(bb[3], bb[3] + dx) + 0.01, Math.max(bb[4], bb[4] + dy) + 0.61, Math.max(bb[5], bb[5] + dz) + 0.01];
-    const boxes = boxesIn(area);
-    const b1 = bb.slice(); let y = sweep(1, dy, b1, boxes); shift(b1, 1, y);
-    let x = sweep(0, dx, b1, boxes); shift(b1, 0, x); let z = sweep(2, dz, b1, boxes); shift(b1, 2, z);
-    const landed = y !== dy && dy < 0;
-    if ((x !== dx || z !== dz) && (ground || landed)) {
-      // Step up onto slabs, stairs and the like (at most 0.6), and keep it if it got further.
-      const b2 = bb.slice(); const up = sweep(1, 0.6, b2, boxes); shift(b2, 1, up);
-      const sx = sweep(0, dx, b2, boxes); shift(b2, 0, sx); const sz = sweep(2, dz, b2, boxes); shift(b2, 2, sz);
-      const down = sweep(1, -up + Math.min(0, dy), b2, boxes); shift(b2, 1, down);
-      if (sx * sx + sz * sz > x * x + z * z + 1e-7) { me.x = (b2[0] + b2[3]) / 2; me.y = b2[1]; me.z = (b2[2] + b2[5]) / 2; return { hitX: sx !== dx, hitZ: sz !== dz, hitY: true, landed: true }; }
-    }
-    me.x = (b1[0] + b1[3]) / 2; me.y = b1[1]; me.z = (b1[2] + b1[5]) / 2;
-    return { hitX: x !== dx, hitZ: z !== dz, hitY: y !== dy, landed };
+  const moved = (bb, v) => [bb[0] + v[0], bb[1] + v[1], bb[2] + v[2], bb[3] + v[0], bb[4] + v[1], bb[5] + v[2]];
+  /* Entity.collideWithShapes: Y first, then the smaller of X and Z last. */
+  function collideVec(bb, mv, boxes) {
+    let dx = mv[0], dy = mv[1], dz = mv[2]; const b = bb.slice();
+    if (dy !== 0) { dy = sweep(1, dy, b, boxes); if (dy !== 0) shift(b, 1, dy); }
+    const zFirst = Math.abs(dx) < Math.abs(dz);
+    if (zFirst && dz !== 0) { dz = sweep(2, dz, b, boxes); if (dz !== 0) shift(b, 2, dz); }
+    if (dx !== 0) { dx = sweep(0, dx, b, boxes); if (!zFirst && dx !== 0) shift(b, 0, dx); }
+    if (!zFirst && dz !== 0) dz = sweep(2, dz, b, boxes);
+    return [dx, dy, dz];
   }
-  /* Sneaking on a ledge: the move is cut back until there is still ground under you (Minecraft's back-off). */
+  const hd2 = v => v[0] * v[0] + v[2] * v[2];
+  /* Entity.collide, with the 0.6 step up onto slabs, stairs and the like. */
+  function collide(mv, h, ground) {
+    const bb = aabbAt(me.x, me.y, me.z, h);
+    const area = [Math.min(bb[0], bb[0] + mv[0]) - 1, Math.min(bb[1], bb[1] + mv[1]) - 1, Math.min(bb[2], bb[2] + mv[2]) - 1, Math.max(bb[3], bb[3] + mv[0]) + 1, Math.max(bb[4], bb[4] + mv[1]) + 1.6, Math.max(bb[5], bb[5] + mv[2]) + 1];
+    const boxes = boxesIn(area);
+    const v = collideVec(bb, mv, boxes);
+    const hx = mv[0] !== v[0], hz = mv[2] !== v[2], down = ground || (mv[1] !== v[1] && mv[1] < 0);
+    if (down && (hx || hz)) {
+      let v31 = collideVec(bb, [mv[0], 0.6, mv[2]], boxes);
+      const exp = [Math.min(bb[0], bb[0] + mv[0]), bb[1], Math.min(bb[2], bb[2] + mv[2]), Math.max(bb[3], bb[3] + mv[0]), bb[4], Math.max(bb[5], bb[5] + mv[2])];
+      const v32 = collideVec(exp, [0, 0.6, 0], boxes);
+      if (v32[1] < 0.6) { const v33 = collideVec(moved(bb, v32), [mv[0], 0, mv[2]], boxes); v33[1] += v32[1]; if (hd2(v33) > hd2(v31)) v31 = v33; }
+      if (hd2(v31) > hd2(v)) { const d = collideVec(moved(bb, v31), [0, -v31[1] + mv[1], 0], boxes); return [v31[0], v31[1] + d[1], v31[2]]; }
+    }
+    return v;
+  }
+  /* Entity.move: moves, then stops the velocity on the axes that hit something. */
+  function moveSelf(mv, h, ground) {
+    const v = collide(mv, h, ground);
+    me.x += v[0]; me.y += v[1]; me.z += v[2];
+    const hitX = Math.abs(mv[0] - v[0]) >= 1e-5, hitZ = Math.abs(mv[2] - v[2]) >= 1e-5, hitY = mv[1] !== v[1];
+    me.ground = hitY && mv[1] < 0;
+    if (hitX) me.vx = 0; if (hitZ) me.vz = 0;
+    if (hitY) {
+      const on = blockNameAt(Math.floor(me.x), Math.floor(me.y - 0.2), Math.floor(me.z)) || "";
+      if (on === "SLIME_BLOCK" && !me.sneak && me.vy < 0) me.vy = -me.vy;
+      else if (/_BED$/.test(on) && !me.sneak && me.vy < 0) me.vy = -me.vy * 0.66;
+      else me.vy = 0;
+    }
+    return { hitX, hitZ, hitY, horiz: hitX || hitZ };
+  }
+  /* Sneaking on a ledge: the move is cut back until there is still ground under you (maybeBackOffFromEdge). */
   function backOff(dx, dz, h) {
-    const over = (ox, oz) => { const bb = aabbAt(me.x + ox, me.y - 0.6, me.z + oz, h); return boxesIn(bb).some(b => b[0] < bb[3] && b[3] > bb[0] && b[2] < bb[5] && b[5] > bb[2] && b[1] < bb[4] && b[4] > bb[1]); };
-    const step = 0.05;
-    while (dx !== 0 && !over(dx, 0)) dx = Math.abs(dx) < step ? 0 : dx - Math.sign(dx) * step;
-    while (dz !== 0 && !over(0, dz)) dz = Math.abs(dz) < step ? 0 : dz - Math.sign(dz) * step;
-    while (dx !== 0 && dz !== 0 && !over(dx, dz)) { dx = Math.abs(dx) < step ? 0 : dx - Math.sign(dx) * step; dz = Math.abs(dz) < step ? 0 : dz - Math.sign(dz) * step; }
+    const free = (ox, oz) => { const bb = aabbAt(me.x + ox, me.y - 0.6, me.z + oz, h); return !boxesIn(bb).some(b => b[0] < bb[3] && b[3] > bb[0] && b[2] < bb[5] && b[5] > bb[2] && b[1] < bb[4] && b[4] > bb[1]); };
+    const step = d => (d < 0.05 && d >= -0.05) ? 0 : d > 0 ? d - 0.05 : d + 0.05;
+    while (dx !== 0 && free(dx, 0)) dx = step(dx);
+    while (dz !== 0 && free(0, dz)) dz = step(dz);
+    while (dx !== 0 && dz !== 0 && free(dx, dz)) { dx = step(dx); dz = step(dz); }
     return [dx, dz];
   }
+  // Minecraft's sine table and float arithmetic, so the movement is the same to the last digit as the game's.
+  const F = Math.fround, SIN = new Float32Array(65536);
+  for (let i = 0; i < 65536; i++) SIN[i] = Math.sin(i * Math.PI * 2 / 65536);
+  const msin = f => SIN[Math.trunc(F(f * F(10430.378))) & 65535], mcos = f => SIN[Math.trunc(F(F(f * F(10430.378)) + 16384)) & 65535];
+  const FRICTION = n => /^(ICE|PACKED_ICE|FROSTED_ICE)$/.test(n) ? F(0.98) : n === "BLUE_ICE" ? F(0.989) : n === "SLIME_BLOCK" ? F(0.8) : F(0.6);
   me.vx = 0; me.vz = 0; me.jumpCd = 0;
-  /* One game tick (50 ms). */
+  /* One game tick (50 ms): LocalPlayer.aiStep + LivingEntity.travel. */
   function physicsTick() {
     const h = me.sneak ? 1.5 : 1.8, fl = Math.floor;
     // As in Minecraft, nobody moves while the ground under them has not arrived yet.
     if (!region || me.x - 1 < region.x0 || me.z - 1 < region.z0 || me.x + 1 >= region.x0 + region.nx || me.z + 1 >= region.z0 + region.nz) { me.vx = me.vy = me.vz = 0; return; }
-    const feet = blockNameAt(fl(me.x), fl(me.y + 0.1), fl(me.z)) || "", chest = blockNameAt(fl(me.x), fl(me.y + 0.9), fl(me.z)) || "";
-    const below = blockNameAt(fl(me.x), fl(me.y - 0.5), fl(me.z)) || "";
-    const water = FLUIDS_W.test(feet) || FLUIDS_W.test(chest), lava = feet === "LAVA" || chest === "LAVA", climb = CLIMB.test(feet);
-    const ground = !!me.ground, using = usingItem();
-    let f = frozen ? 0 : input.f, st = frozen ? 0 : input.s;
-    if (me.sneak) { f *= 0.3; st *= 0.3; }
-    if (using) { f *= 0.2; st *= 0.2; }
-    const l = Math.hypot(f, st); if (l > 1) { f /= l; st /= l; }
-    f *= 0.98; st *= 0.98;
-    const sprint = me.run && input.f > 0.3 && !me.sneak && !using && stat.food > 6 && !frozen;
-    me.sprinting = sprint;
-    const yaw = me.yaw * Math.PI / 180, fx = -Math.sin(yaw), fz = Math.cos(yaw);
-    if (input.jump && !frozen) {
-      if (water || lava) me.vy += 0.04;
-      else if (ground && me.jumpCd <= 0) {
-        me.vy = 0.42 + 0.1 * effects.j; jumpSent = true; me.jumpCd = 10;
-        if (sprint) { me.vx += fx * 0.2; me.vz += fz * 0.2; }
-      }
-    }
-    if (!input.jumpHeld) input.jump = false;
     if (me.jumpCd > 0) me.jumpCd--;
-    const slip = ground ? SLIP(below) : 1;
-    let accel;
-    if (water || lava) accel = 0.02;
-    else if (ground) accel = 0.1 * (sprint ? 1.3 : 1) * (1 + 0.2 * effects.s) * Math.max(0, 1 - 0.15 * effects.sl) * 0.21600002 / (slip * slip * slip);
-    else accel = sprint ? 0.026 : 0.02;
-    me.vx += (fx * f + (-fz) * st) * accel; me.vz += (fz * f + fx * st) * accel;
-    if (climb) { me.vx = Math.max(-0.15, Math.min(0.15, me.vx)); me.vz = Math.max(-0.15, Math.min(0.15, me.vz)); me.vy = Math.max(me.vy, -0.15); if (me.sneak && me.vy < 0) me.vy = 0; }
-    let mx = me.vx, my = me.vy, mz = me.vz;
-    if (feet === "COBWEB") { mx *= 0.25; my *= 0.05; mz *= 0.25; }
-    else if (feet === "SWEET_BERRY_BUSH") { mx *= 0.8; my *= 0.75; mz *= 0.8; }
-    if (me.sneak && ground && my <= 0) [mx, mz] = backOff(mx, mz, h);
-    const r = collideMove(mx, my, mz, h, ground);
-    if (feet === "COBWEB" || feet === "SWEET_BERRY_BUSH") { me.vx = 0; me.vy = 0; me.vz = 0; }
-    if (r.hitX) me.vx = 0; if (r.hitZ) me.vz = 0; if (r.hitY) me.vy = 0;
-    if (climb && (r.hitX || r.hitZ)) me.vy = 0.2;
-    me.ground = r.landed;
-    if (water) { me.vx *= sprint ? 0.9 : 0.8; me.vz *= sprint ? 0.9 : 0.8; me.vy = me.vy * 0.8 - 0.02; }
-    else if (lava) { me.vx *= 0.5; me.vz *= 0.5; me.vy = me.vy * 0.5 - 0.02; }
-    else {
-      if (effects.lev) me.vy += (0.05 * effects.lev - me.vy) * 0.2;
-      else me.vy -= (effects.sf && me.vy <= 0) ? 0.01 : 0.08;
-      me.vy *= 0.98;
-      const frc = me.ground ? SLIP(blockNameAt(fl(me.x), fl(me.y - 0.5), fl(me.z)) || "") * 0.91 : 0.91;
-      me.vx *= frc; me.vz *= frc;
+    if (Math.abs(me.vx) < 0.003) me.vx = 0; if (Math.abs(me.vy) < 0.003) me.vy = 0; if (Math.abs(me.vz) < 0.003) me.vz = 0;
+    const feetN = blockNameAt(fl(me.x), fl(me.y), fl(me.z)) || "", chest = blockNameAt(fl(me.x), fl(me.y + 0.9), fl(me.z)) || "";
+    const underPos = () => blockNameAt(fl(me.x), fl(me.y - 0.5000001), fl(me.z)) || "";
+    const water = FLUIDS_W.test(feetN) || FLUIDS_W.test(chest), lava = feetN === "LAVA" || chest === "LAVA", climb = CLIMB.test(feetN);
+    const ground = !!me.ground, using = usingItem();
+    // Keys are pressed or not: a stick pushed part way counts as the key, as Minecraft's own touch controls do.
+    const key = v => v > 0.35 ? 1 : v < -0.35 ? -1 : 0;
+    let zza = frozen ? 0 : key(input.f), xxa = frozen ? 0 : -key(input.s);
+    if (me.sneak) { zza = F(zza * F(0.3)); xxa = F(xxa * F(0.3)); }
+    if (using) { zza = F(zza * F(0.2)); xxa = F(xxa * F(0.2)); }
+    const sprint = me.run && key(input.f) > 0 && !me.sneak && !using && stat.food > 6 && !frozen;
+    me.sprinting = sprint;
+    const yawF = F(me.yaw * F(0.017453292));
+    const jumping = (input.jump || input.jumpHeld) && !frozen;
+    if (jumping) {
+      if (water || lava) me.vy += F(0.04);
+      else if (ground && me.jumpCd === 0) {
+        const factor = (feetN === "HONEY_BLOCK" || underPos() === "HONEY_BLOCK") ? F(0.5) : 1;
+        me.vy = F(F(F(0.42) * factor) + (effects.j ? F(F(0.1) * effects.j) : 0)); jumpSent = true; me.jumpCd = 10;
+        if (sprint) { me.vx += F(-msin(yawF) * F(0.2)); me.vz += F(mcos(yawF) * F(0.2)); }
+      }
+    } else me.jumpCd = 0;
+    input.jump = false;
+    xxa = F(xxa * F(0.98)); zza = F(zza * F(0.98));
+    // moveRelative: the keys turned into a push along where you look.
+    const push = speed => {
+      let ix = xxa, iz = zza; const l2 = ix * ix + iz * iz; if (l2 < 1e-7) return;
+      if (l2 > 1) { const l = Math.sqrt(l2); ix /= l; iz /= l; }
+      ix *= speed; iz *= speed;
+      const s = msin(yawF), c = mcos(yawF);
+      me.vx += ix * c - iz * s; me.vz += iz * c + ix * s;
+    };
+    const vyStart = me.vy, gravity = (vyStart <= 0 && effects.sf) ? 0.01 : 0.08;
+    let stuck = null; if (feetN === "COBWEB") stuck = [0.25, 0.05, 0.25]; else if (feetN === "SWEET_BERRY_BUSH") stuck = [0.8, 0.75, 0.8];
+    const doMove = () => {
+      let mv = [me.vx, me.vy, me.vz];
+      if (stuck) { mv = [mv[0] * stuck[0], mv[1] * stuck[1], mv[2] * stuck[2]]; me.vx = me.vy = me.vz = 0; }
+      if (me.sneak && ground && mv[1] <= 0) { const b = backOff(mv[0], mv[2], h); mv[0] = b[0]; mv[2] = b[1]; }
+      const r = moveSelf(mv, h, ground);
+      // Soul sand and honey slow you down (getBlockSpeedFactor).
+      const at = blockNameAt(fl(me.x), fl(me.y), fl(me.z)) || "";
+      let sf = /^(SOUL_SAND|HONEY_BLOCK)$/.test(at) ? F(0.4) : 1;
+      if (sf === 1 && !FLUIDS_W.test(at)) sf = /^(SOUL_SAND|HONEY_BLOCK)$/.test(underPos()) ? F(0.4) : 1;
+      me.vx *= sf; me.vz *= sf;
+      return r;
+    };
+    const climbClamp = () => { if (!climb) return; me.vx = Math.max(-0.15, Math.min(0.15, me.vx)); me.vz = Math.max(-0.15, Math.min(0.15, me.vz)); me.vy = Math.max(me.vy, -0.15); if (me.sneak && me.vy < 0) me.vy = 0; };
+    if (water) {
+      const y0 = me.y, slow = sprint ? F(0.9) : F(0.8);
+      push(F(0.02)); const r = doMove();
+      if (r.horiz && climb) me.vy = 0.2;
+      me.vx *= slow; me.vy *= F(0.8); me.vz *= slow;
+      if (!sprint) me.vy = (vyStart <= 0 && Math.abs(me.vy - 0.005) >= 0.003 && Math.abs(me.vy - gravity / 16) < 0.003) ? -0.003 : me.vy - gravity / 16;
+      if (r.horiz && !collide([me.vx, me.vy + 0.6 - me.y + y0, me.vz], h, false).some((d, i) => d !== [me.vx, me.vy + 0.6 - me.y + y0, me.vz][i])) me.vy = 0.3;
+    } else if (lava) {
+      push(F(0.02)); doMove();
+      me.vx *= 0.5; me.vy *= 0.8; me.vz *= 0.5; me.vy -= gravity / 4;
+    } else {
+      // Friction comes from the block under you before the move.
+      const slip = FRICTION(underPos()), friction = ground ? F(slip * F(0.91)) : F(0.91);
+      let speed;
+      if (ground) {
+        let attr = 0.1; if (effects.s) attr *= 1 + 0.2 * effects.s; if (effects.sl) attr *= Math.max(0, 1 - 0.15 * effects.sl); if (sprint) attr *= 1.3;
+        speed = F(F(attr) * F(F(0.21600002) / F(F(slip * slip) * slip)));
+      } else speed = sprint ? F(0.025999999) : F(0.02);
+      push(speed); climbClamp();
+      const r = doMove();
+      if ((r.horiz || jumping) && climb) me.vy = 0.2;
+      let vy = me.vy;
+      if (effects.lev) vy += (0.05 * effects.lev - vy) * 0.2;
+      else vy -= gravity;
+      me.vx *= friction; me.vy = vy * F(0.98); me.vz *= friction;
     }
-    const sf = me.ground ? SPEEDF(blockNameAt(fl(me.x), fl(me.y - 0.5), fl(me.z)) || "") : 1; me.vx *= sf; me.vz *= sf;
-    if (Math.abs(me.vx) < 0.003) me.vx = 0; if (Math.abs(me.vz) < 0.003) me.vz = 0; if (Math.abs(me.vy) < 0.003) me.vy = 0;
   }
   const input = { f: 0, s: 0, jump: false };
   let charge = -1;
@@ -2806,7 +2862,7 @@
     // A server teleport (or a pull-back) is taken the moment it arrives: until then the relay drops our
     // positions, so every frame of delay is time the server sees us standing still.
     if (me.ready && o.me && o.tp !== undefined && o.tp !== me.tp) {
-      me.x = me.px = o.me[0]; me.y = me.py = o.me[1]; me.z = me.pz = o.me[2]; me.vy = 0; me.vx = 0; me.vz = 0; me.tp = o.tp;
+      me.x = me.px = o.me[0]; me.y = me.py = o.me[1]; me.z = me.pz = o.me[2]; me.vy = 0; me.vx = 0; me.vz = 0; me.tp = o.tp; me.ground = false; // as after a teleport in Minecraft: not on the ground until the next landing
     }
     if (typeof o.ts !== "number") { snaps.push({ at: now, d: o }); if (snaps.length > 16) snaps.shift(); return; }
     const off = now - o.ts;
@@ -2855,7 +2911,7 @@
         if (!spectating) {
           tickAcc += dt;
           if (tickAcc > 0.25) tickAcc = 0.05;
-          while (tickAcc >= 0.05) { tickAcc -= 0.05; me.px = me.x; me.py = me.y; me.pz = me.z; physicsTick(); sendInput(true); }
+          while (tickAcc >= 0.05) { tickAcc -= 0.05; me.px = me.x; me.py = me.y; me.pz = me.z; physicsTick(); sendInput(true, true); }
         }
       }
       const k = Math.min(1, tickAcc / 0.05);
@@ -2977,13 +3033,15 @@
 
   // ---------- input: phone (joystick, look drag, buttons) and desktop (WASD + mouse) ----------
   let lastSent = 0;
-  function sendInput(force) {
+  /* Every game tick sends exactly one report, with the exact position and look (as a Minecraft client's move packet). */
+  function sendInput(force, tick) {
     if (!me.ready) return;
     const now = performance.now();
     if (!force && now - lastSent < 50) return;
     lastSent = now;
-    send({ t: "in", f: +input.f.toFixed(2), s: +input.s.toFixed(2), yaw: +me.yaw.toFixed(1), pitch: +me.pitch.toFixed(1), run: !!me.sprinting, sneak: me.sneak, jump: jumpSent, pos: [+me.x.toFixed(3), +me.y.toFixed(3), +me.z.toFixed(3)], ground: !!me.ground, tp: me.tp });
-    jumpSent = false;
+    const o = { t: "in", f: +input.f.toFixed(2), s: +input.s.toFixed(2), yaw: me.yaw, pitch: me.pitch, run: !!me.sprinting, sneak: me.sneak, jump: jumpSent, tp: me.tp };
+    if (tick) { o.k = 1; o.pos = [me.x, me.y, me.z]; o.ground = !!me.ground; jumpSent = false; }
+    send(o);
   }
   // In the background (frames paused) keep the server informed.
   setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);

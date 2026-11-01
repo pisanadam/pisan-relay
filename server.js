@@ -172,6 +172,7 @@ wss.on("connection", (ws, req) => {
 
 const toYaw = deg => Math.PI - deg * Math.PI / 180;           // Minecraft degrees -> mineflayer radians
 const toPitch = deg => -deg * Math.PI / 180;
+const HELD_PACKETS = /^(arm_animation|use_item|block_place|use_entity|block_dig|held_item_slot|entity_action|window_click|close_window|set_creative_slot|pick_item)$/;
 const fromYaw = rad => ((180 - rad * 180 / Math.PI) % 360 + 540) % 360 - 180;
 const fromPitch = rad => -rad * 180 / Math.PI;
 const r2 = v => Math.round(v * 100) / 100;
@@ -215,6 +216,42 @@ class Session {
     let bot;
     try { bot = this.bot = mineflayer.createBot(options); }
     catch (e) { this.connecting = false; return this.send({ t: "error", text: "Bağlanılamadı: " + e.message }); }
+    // Movement leaves only as the page's ticks: one packet per game tick, as a Minecraft client sends them.
+    // mineflayer's own reports are held back, except its answer to a server teleport.
+    const raw = bot._client.write.bind(bot._client);
+    this.held = [];
+    this.flushHeld = () => { if (!this.held.length) return; const q = this.held; this.held = []; this.flushing = true; try { for (const [n, d] of q) raw(n, d); } finally { this.flushing = false; } };
+    bot._client.write = (name, data) => {
+      // Clicks, item use, digging, slot and sprint changes go out in the next tick, before its move, where a
+      // Minecraft client sends them.
+      if (HELD_PACKETS.test(name) && !this.flushing) { if (!this.held.length) this.heldAt = Date.now(); this.held.push([name, data]); return; }
+      if (name === "position_look" && !this.ownMove && this.dropTpReply) { this.dropTpReply = false; return; }
+      if (/^(position|position_look|look|flying)$/.test(name) && !this.ownMove) {
+        if (!(name === "position_look" && this.tpReply)) return;
+        this.tpReply = false;
+        // The teleport answer is the last position and look the server has from us.
+        this.lastMove = { x: data.x, y: data.y, z: data.z, yaw: Math.fround(data.yaw), pitch: Math.fround(data.pitch), ground: !!data.onGround, remind: 0 };
+      }
+      return raw(name, data);
+    };
+    // Packets are answered in the order they came: the pings before a teleport are answered before its confirmation.
+    bot._client.prependListener("position", () => { this.tpReply = true; this.pongUpTo(Infinity); });
+    // After a respawn mineflayer holds its teleport answer back for a while; a Minecraft client answers at once.
+    bot._client.on("position", () => queueMicrotask(() => { // after mineflayer's own handler (and its confirmation)
+      if (!this.tpReply || !bot.entity) return;
+      const p = bot.entity.position, yaw = Math.fround(fromYaw(bot.entity.yaw)), pitch = Math.fround(fromPitch(bot.entity.pitch));
+      this.ownMove = true;
+      try { bot._client.write("position_look", { x: p.x, y: p.y, z: p.z, yaw, pitch, onGround: false, flags: { onGround: false } }); } finally { this.ownMove = false; }
+      this.tpReply = false; this.dropTpReply = true; this.tpSeq++;
+      this.lastMove = { x: p.x, y: p.y, z: p.z, yaw, pitch, ground: false, remind: 0 };
+    }));
+    // The server's pings (which anticheats use to know what the client has seen) are answered by the page,
+    // after it has taken in everything sent before them, as a Minecraft client answers them between its ticks.
+    this.txq = []; this.txSent = [];
+    bot.once("login", () => {
+      bot._client.removeAllListeners("ping");
+      bot._client.on("ping", p => { if (this.txq.length || (this.changes && this.changes.length) || !this.regionAt) this.txq.push(p.id); else this.sendTx(p.id); });
+    });
     bot.once("login", () => {
       if (!this.home) return;
       // Pisan Lig: prove this "(mobil)" player comes from the relay, and let the plugin send the extras.
@@ -233,7 +270,10 @@ class Session {
       this.Block = require("prismarine-block")(bot.registry);
       this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : "Pisan PvP", version: bot.version });
       // States follow the server's ticks (the plugin's extras arrive once per tick); the timer covers other servers.
-      this.timer = setInterval(() => { if (Date.now() - (this.extrasAt || 0) > 200) this.tick(); }, 50);
+      this.timer = setInterval(() => {
+        if (Date.now() - (this.extrasAt || 0) > 200) this.tick();
+        if (this.held.length && Date.now() - this.heldAt > 250) this.flushHeld(); // the page stopped ticking (in the background)
+      }, 50);
       bot.world.on("blockUpdate", (old, now) => {
         if (!now || !this.box) return;
         const p = now.position, b = this.box;
@@ -245,12 +285,12 @@ class Session {
         const b = this.box;
         if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
       });
-      bot.on("respawn", () => { this.regionAt = null; this.send({ t: "noworld" }); });
+      bot.on("respawn", () => { this.regionAt = null; this.tpReply = true; this.sprintSent = this.sneakSent = false; this.send({ t: "noworld" }); }); // a new world: no move until its teleport is answered
       // Knockback and explosions push us: the page moves by them, and the check allows for them.
       this.move = { air: 0, rise: 0, hover: 0, kbH: 0, kbY: 0 };
-      const push = (vx, vy, vz) => { this.move.kbH = Math.max(this.move.kbH, Math.hypot(vx, vz) + 0.1); this.move.kbY = Math.max(this.move.kbY, vy + 0.1); this.send({ t: "vel", v: [vx, vy, vz] }); };
+      const push = (vx, vy, vz, add) => { this.move.kbH = Math.max(this.move.kbH, Math.hypot(vx, vz) + 0.1); this.move.kbY = Math.max(this.move.kbY, vy + 0.1); this.ordered(add ? { t: "vel", v: [vx, vy, vz], add: 1 } : { t: "vel", v: [vx, vy, vz] }); };
       bot._client.on("entity_velocity", p => { if (bot.entity && p.entityId === bot.entity.id) { const v = p.velocity || { x: p.velocityX, y: p.velocityY, z: p.velocityZ }; push(v.x / 8000, v.y / 8000, v.z / 8000); }; });
-      bot._client.on("explosion", p => { const x = p.playerMotionX ?? (p.playerKnockback && p.playerKnockback.x), y = p.playerMotionY ?? (p.playerKnockback && p.playerKnockback.y), z = p.playerMotionZ ?? (p.playerKnockback && p.playerKnockback.z); if (x || y || z) push(+x || 0, +y || 0, +z || 0); });
+      bot._client.on("explosion", p => { const x = p.playerMotionX ?? (p.playerKnockback && p.playerKnockback.x), y = p.playerMotionY ?? (p.playerKnockback && p.playerKnockback.y), z = p.playerMotionZ ?? (p.playerKnockback && p.playerKnockback.z); if (x || y || z) push(+x || 0, +y || 0, +z || 0, true); });
       bot._client.on("tile_entity_data", p => {
         const l = p.location, b = this.box; if (!b || !l || l.x < b.x0 || l.x > b.x1 || l.z < b.z0 || l.z > b.z1 || l.y < b.y0 || l.y >= b.y1) return;
         setTimeout(() => { const d = this.beOf(l.x, l.y, l.z); this.send({ t: "be", list: [[l.x, l.y, l.z, d]] }); }, 50);
@@ -328,20 +368,31 @@ class Session {
     if (!bot || !bot.entity) return;
     const adventure = bot.game && (bot.game.gameMode === "adventure" || bot.game.gameMode === "spectator");
     switch (o.t) {
+      case "pong": this.pongUpTo(o.id); break;
       case "in": {
+        const yaw = +o.yaw, pitch = Math.max(-90, Math.min(90, +o.pitch));
+        if (Number.isFinite(yaw) && Number.isFinite(pitch)) { bot.entity.yaw = toYaw(yaw); bot.entity.pitch = toPitch(pitch); }
+        if (!o.k) break;
+        // One game tick of the page. First the sprint and sneak keys (as a client sends them before its move),
         const f = +o.f || 0;
-        // Sprinting as a client may: forward, not sneaking, not starving (food above 6).
+        // sprinting as a client may: forward, not sneaking, not starving (food above 6).
         const sprint = !!o.run && f > 0.3 && !o.sneak && (bot.food === undefined || bot.food > 6);
-        if (bot.getControlState("sprint") !== sprint) bot.setControlState("sprint", sprint);
-        if (bot.getControlState("sneak") !== !!o.sneak) bot.setControlState("sneak", !!o.sneak);
-        if (Number.isFinite(+o.yaw) && Number.isFinite(+o.pitch)) { bot.entity.yaw = toYaw(+o.yaw); bot.entity.pitch = toPitch(Math.max(-90, Math.min(90, +o.pitch))); }
-        // The page moves the player (with collisions), as a Minecraft client does; the client here only reports it.
+        // (Kept here rather than in mineflayer: a respawned player starts fresh, and the keys still held are sent again.)
+        const act = id => bot._client.write("entity_action", { entityId: bot.entity.id, actionId: id, jumpBoost: 0 });
+        if (!!this.sprintSent !== sprint) { this.sprintSent = sprint; act(sprint ? 3 : 4); }
+        if (!!this.sneakSent !== !!o.sneak) { this.sneakSent = !!o.sneak; act(o.sneak ? 0 : 1); }
+        this.flushHeld();
+        // then the move. The page moves the player (with collisions), as a Minecraft client does.
         // After a server teleport, positions from before the page saw it are ignored.
-        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq) {
+        // A dead player does not move, and nothing moves before the server's teleport has been answered.
+        const alive = bot.isAlive !== false && !(bot.health <= 0);
+        if (alive && !this.tpReply && Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq && Number.isFinite(yaw) && Number.isFinite(pitch)) {
           const check = this.checkMove(o.pos, !!o.sneak);
           if (check.ok) {
             bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
-            bot.entity.onGround = check.ground;
+            const ground = !!o.ground;
+            bot.entity.onGround = ground;
+            this.sendMove(yaw, pitch, ground);
           } else {
             // Not a move a Minecraft client could make: it never reaches the server; the page is put back.
             this.tpSeq++;
@@ -373,8 +424,6 @@ class Session {
       const entity = bot.entityAtCursor(creative ? 5 : 3);
       if (entity) {
         bot.attack(entity);
-        // As a client does: a hit while sprinting ends the sprint; holding DEPAR starts it again next tick.
-        if (bot.getControlState("sprint")) bot.setControlState("sprint", false);
         return;
       }
       const block = !adventure && bot.blockAtCursor(creative ? 5 : 4.5);
@@ -395,7 +444,7 @@ class Session {
       if (entity && entity.type !== "object") { bot.activateEntity(entity).catch(() => { }); return; }
       const block = bot.blockAtCursor(creative ? 5 : 4.5);
       if (block && block.name !== "air" && !adventure) {
-        if (INTERACTIVE.test(block.name) && !bot.getControlState("sneak")) { bot.activateBlock(block).catch(() => { }); return; }
+        if (INTERACTIVE.test(block.name) && !this.sneakSent) { bot.activateBlock(block).catch(() => { }); return; }
         if (held && bot.registry.blocksByName[held.name] && block.face !== undefined) {
           const faces = [new Vec3(0, -1, 0), new Vec3(0, 1, 0), new Vec3(0, 0, -1), new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(1, 0, 0)];
           const at = block.position.plus(faces[block.face]), name = held.name;
@@ -443,6 +492,8 @@ class Session {
       });
       this.send({ t: "blocks", list });
     }
+    // Pings go after the blocks and states that came before them.
+    if (this.txq.length) { const q = this.txq; this.txq = []; for (const x of q) { if (typeof x === "object") this.send(x); else this.sendTx(x); } }
     const people = [];
     for (const e of Object.values(bot.entities)) {
       if (!e.position || e.position.distanceTo(view) > 80) continue;
@@ -549,6 +600,41 @@ class Session {
   nameAt(x, y, z) { try { const b = this.bot.blockAt(new Vec3(Math.floor(x), Math.floor(y), Math.floor(z))); return b ? b.name : ""; } catch (e) { return ""; } }
   /* Would a Minecraft client make this move? Not through blocks, not faster than running and jumping can take
      you (more on ice, with speed, after knockback), no climbing into the air or hanging in it. */
+  sendTx(id) { this.send({ t: "tx", id }); this.txSent.push(id); }
+  /* Something the server sent between pings (knockback): it reaches the page in the same order. */
+  ordered(msg) { if (this.txq.length) this.txq.push(msg); else this.send(msg); }
+  /* Answers the pings up to this one (only pings the server sent, each once, in order). id Infinity: all of them. */
+  pongUpTo(id) {
+    const c = this.bot && this.bot._client; if (!c) return;
+    if (id === Infinity) { const q = this.txq; this.txq = []; for (const x of q) { if (typeof x === "object") this.send(x); else this.txSent.push(x); } }
+    const i = id === Infinity ? this.txSent.length - 1 : this.txSent.indexOf(id);
+    if (i < 0) return;
+    for (const x of this.txSent.splice(0, i + 1)) c.write("pong", { id: x });
+  }
+
+  /* LocalPlayer.sendPosition: position and look only when they changed (the position at least once a second),
+     or just the on-ground flag when only that changed. */
+  sendMove(yaw, pitch, ground) {
+    const p = this.bot.entity.position, L = this.lastMove || (this.lastMove = { x: NaN, y: NaN, z: NaN, yaw: NaN, pitch: NaN, ground: null, remind: 0 });
+    // A Minecraft client's yaw keeps counting past ±180 as you turn round; the page's wraps.
+    if (Number.isFinite(L.yaw)) yaw = L.yaw + ((((yaw - L.yaw) % 360) + 540) % 360 - 180);
+    yaw = Math.fround(yaw); pitch = Math.fround(pitch);
+    L.remind++;
+    const dx = p.x - L.x, dy = p.y - L.y, dz = p.z - L.z;
+    const pos = !(dx * dx + dy * dy + dz * dz <= 4e-8) || L.remind >= 20, rot = yaw !== L.yaw || pitch !== L.pitch;
+    const c = this.bot._client;
+    this.ownMove = true;
+    try {
+      if (pos && rot) c.write("position_look", { x: p.x, y: p.y, z: p.z, yaw, pitch, onGround: ground, flags: { onGround: ground } });
+      else if (pos) c.write("position", { x: p.x, y: p.y, z: p.z, onGround: ground, flags: { onGround: ground } });
+      else if (rot) c.write("look", { yaw, pitch, onGround: ground, flags: { onGround: ground } });
+      else if (ground !== L.ground) c.write("flying", { onGround: ground, flags: { onGround: ground } });
+    } finally { this.ownMove = false; }
+    if (pos) { L.x = p.x; L.y = p.y; L.z = p.z; L.remind = 0; }
+    if (rot) { L.yaw = yaw; L.pitch = pitch; }
+    L.ground = ground;
+  }
+
   checkMove(pos, sneak) {
     const from = this.bot.entity.position, m = this.move || (this.move = { air: 0, rise: 0, hover: 0, kbH: 0, kbY: 0 });
     const dx = pos[0] - from.x, dy = pos[1] - from.y, dz = pos[2] - from.z, hd = Math.hypot(dx, dz);
