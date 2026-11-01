@@ -58,7 +58,7 @@ async function skinPng(name) {
 /* pack.zip may be a whole Minecraft client .jar (23 MB): players get only what the game draws (block, item and
    GUI textures), copied entry by entry, still compressed, into pack-web.zip. */
 function slimPack() {
-  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web2.zip");
+  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web3.zip");
   let st; try { st = fs.statSync(src); } catch (e) { return null; }
   try { if (fs.statSync(out).mtimeMs >= st.mtimeMs) return out; } catch (e) { }
   try {
@@ -77,7 +77,7 @@ function slimPack() {
       const lo = b.readUInt32LE(p + 42), csize = b.readUInt32LE(p + 20);
       const central = b.subarray(p, p + 46 + nameLen + extraLen + commentLen);
       p += 46 + nameLen + extraLen + commentLen;
-      if (!/^assets\/minecraft\/(textures\/(block|item|gui|font|environment)\/[a-z0-9_\/]+\.png(\.mcmeta)?|font\/[a-z0-9_\/]+\.json)$/.test(name)) continue;
+      if (!/^assets\/minecraft\/(textures\/(block|item|gui|font|environment|entity)\/[a-z0-9_\/]+\.png(\.mcmeta)?|font\/[a-z0-9_\/]+\.json)$/.test(name)) continue;
       const lNameLen = b.readUInt16LE(lo + 26), lExtraLen = b.readUInt16LE(lo + 28);
       const local = Buffer.from(b.subarray(lo, lo + 30 + lNameLen + lExtraLen + csize));
       local.writeUInt16LE(local.readUInt16LE(6) & ~8, 6); // sizes are in the header; no data descriptor follows
@@ -85,7 +85,7 @@ function slimPack() {
       locals.push(local); centrals.push(c); offset += local.length;
     }
     if (!locals.length) throw new Error("pakette doku yok");
-    try { fs.unlinkSync(path.join(__dirname, "pack-web.zip")); } catch (e) { }
+    for (const old of ["pack-web.zip", "pack-web2.zip"]) try { fs.unlinkSync(path.join(__dirname, old)); } catch (e) { }
     const cd = Buffer.concat(centrals), end = Buffer.alloc(22);
     end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(locals.length, 8); end.writeUInt16LE(locals.length, 10);
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
@@ -93,6 +93,31 @@ function slimPack() {
     log("Doku paketi hazırlandı:", locals.length, "doku,", Math.round(offset / 1024), "KB");
     return out;
   } catch (e) { log("Doku paketi okunamadı:", e.message); return null; }
+}
+/* Minecraft's sounds are not in the client .jar: they come from Mojang's asset server, looked up in the 1.20.1
+   asset index, fetched the first time a player needs one and kept in sounds-cache/. */
+const SND_DIR = path.join(__dirname, "sounds-cache");
+let assetIndex = null;
+async function assets() {
+  if (assetIndex) return assetIndex;
+  const f = path.join(SND_DIR, "index-1.20.1.json");
+  try { assetIndex = JSON.parse(fs.readFileSync(f, "utf8")); return assetIndex; } catch (e) { }
+  const manifest = await getJson("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json");
+  const v = manifest && manifest.versions.find(x => x.id === "1.20.1");
+  const ver = v && await getJson(v.url);
+  const idx = ver && await getJson(ver.assetIndex.url);
+  if (!idx) return null;
+  fs.mkdirSync(SND_DIR, { recursive: true }); fs.writeFileSync(f, JSON.stringify(idx));
+  assetIndex = idx; return idx;
+}
+const assetJobs = new Map();
+async function asset(name) {
+  const idx = await assets(); const o = idx && idx.objects[name];
+  if (!o) return null;
+  const f = path.join(SND_DIR, o.hash);
+  try { return fs.readFileSync(f); } catch (e) { }
+  if (!assetJobs.has(o.hash)) assetJobs.set(o.hash, getBuffer("https://resources.download.minecraft.net/" + o.hash.slice(0, 2) + "/" + o.hash).then(b => { assetJobs.delete(o.hash); if (b) { fs.mkdirSync(SND_DIR, { recursive: true }); fs.writeFileSync(f, b); } return b; }));
+  return assetJobs.get(o.hash);
 }
 const server = http.createServer(async (req, res) => {
   const url = decodeURIComponent((req.url || "/").split("?")[0]);
@@ -109,6 +134,9 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "application/zip", "Content-Length": st.size, "Cache-Control": "max-age=3600" });
     return fs.createReadStream(f).pipe(res);
   }
+  if (url === "/sounds.json") { const b = await asset("minecraft/sounds.json"); return b ? send(200, "application/json", b, "max-age=86400") : send(404, "text/plain", "404"); }
+  m = url.match(/^\/snd\/([a-z0-9_\/.-]{1,120})\.ogg$/);
+  if (m && !m[1].includes("..")) { const b = await asset("minecraft/sounds/" + m[1] + ".ogg"); return b ? send(200, "audio/ogg", b, "max-age=604800") : send(404, "text/plain", "404"); }
   m = url.match(/^\/skin\/(@ball|[A-Za-z0-9_]{1,16})$/);
   if (m) { const png = await skinPng(m[1]); return png ? send(200, "image/png", png, "max-age=600") : send(404, "text/plain", "404"); }
   send(404, "text/plain", "404");
@@ -211,6 +239,16 @@ class Session {
       this.anims = [];
       bot.on("entitySwingArm", e => { if (e !== bot.entity) this.anims.push([this.idOf(e), "s"]); });
       bot.on("entityHurt", e => this.anims.push([this.idOf(e), "h"]));
+      // Sounds: by name, or by number in the sound registry (minecraft-data counts from 1, the packet from 0).
+      const soundOf = p => p.sound ? (p.sound.data ? p.sound.data.soundName : (bot.registry.sounds[p.sound.soundId + 1] || {}).name) : (bot.registry.sounds[p.soundId + 1] || {}).name;
+      bot._client.on("sound_effect", p => { const n = soundOf(p); if (n) this.send({ t: "snd", n: n.replace(/^minecraft:/, ""), x: p.x / 8, y: p.y / 8, z: p.z / 8, v: +p.volume.toFixed(2), p: +p.pitch.toFixed(2) }); });
+      bot._client.on("entity_sound_effect", p => { const n = soundOf(p), e = bot.entities[p.entityId]; if (n && e) this.send({ t: "snd", n: n.replace(/^minecraft:/, ""), x: e.position.x, y: e.position.y, z: e.position.z, v: +p.volume.toFixed(2), p: +p.pitch.toFixed(2) }); });
+      bot._client.on("world_event", p => {
+        // 2001: someone broke a block (the breaker plays it themselves, everyone else is told).
+        if (p.effectId !== 2001) return;
+        const b = bot.registry.blocksByStateId[p.data];
+        if (b) this.send({ t: "blk", k: "break", n: b.name, x: p.location.x + 0.5, y: p.location.y + 0.5, z: p.location.z + 0.5 });
+      });
     });
     bot._client.on("custom_payload", p => {
       if (p.channel !== "pisan:web") return;
@@ -306,7 +344,11 @@ class Session {
         return;
       }
       const block = !adventure && bot.blockAtCursor(5);
-      if (block && block.name !== "air" && bot.canDigBlock(block)) { bot.dig(block, "ignore").catch(() => { }); this.digging = true; return; }
+      if (block && block.name !== "air" && bot.canDigBlock(block)) {
+        const p = block.position, name = block.name;
+        bot.dig(block, "ignore").then(() => this.send({ t: "blk", k: "break", n: name, x: p.x + 0.5, y: p.y + 0.5, z: p.z + 0.5 })).catch(() => { });
+        this.digging = true; return;
+      }
       bot.swingArm("right");
     } else if (a === "lup") {
       if (this.digging) { this.digging = false; try { bot.stopDigging(); } catch (e) { } }
@@ -321,7 +363,9 @@ class Session {
         if (INTERACTIVE.test(block.name) && !bot.getControlState("sneak")) { bot.activateBlock(block).catch(() => { }); return; }
         if (held && bot.registry.blocksByName[held.name] && block.face !== undefined) {
           const faces = [new Vec3(0, -1, 0), new Vec3(0, 1, 0), new Vec3(0, 0, -1), new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(1, 0, 0)];
+          const at = block.position.plus(faces[block.face]), name = held.name;
           bot.placeBlock(block, faces[block.face]).catch(() => { });
+          this.send({ t: "blk", k: "place", n: name, x: at.x + 0.5, y: at.y + 0.5, z: at.z + 0.5 });
           return;
         }
       }
@@ -388,6 +432,8 @@ class Session {
     if (this.tpSent !== this.tpSeq) { this.tpSent = this.tpSeq; o.yaw = Math.round(fromYaw(bot.entity.yaw) * 10) / 10; o.pitch = Math.round(fromPitch(bot.entity.pitch) * 10) / 10; }
     if (x.b) { o.b = x.b; o.r = x.r; o.bl = x.bl; o.c = x.c; o.ph = x.ph; o.pause = x.pause; }
     if (camera) o.cam = camera;
+    if (bot.time) { o.time = bot.time.timeOfDay; o.mp = bot.time.moonPhase || 0; }
+    if (bot.isRaining) o.rain = 1;
     if (bot.experience) o.xp = [bot.experience.level || 0, Math.round((bot.experience.progress || 0) * 100) / 100];
     if (this.anims && this.anims.length) { o.an = this.anims; this.anims = []; }
     this.send(o);

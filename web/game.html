@@ -345,7 +345,7 @@
       const map = new Map();
       const jobs = [];
       zip.forEach((path, entry) => {
-        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
+        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment|entity)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
         if (m && (m[1] !== "block" || !m[2].includes("/"))) {
           // Block textures by bare name (as the world asks for them), everything else by folder/name.
           const meta = !!m[3], key = (m[1] === "block" && !meta ? m[2] : m[1] + "/" + m[2]) + (meta ? ".mcmeta" : "");
@@ -360,7 +360,7 @@
       if (!map.size) throw new Error("Pakette doku yok");
       userPack = map; resetTextures();
       document.querySelectorAll(".packName").forEach(e => e.textContent = (label || "Kendi paketin: " + (file.name || "kayıtlı paket")) + " (" + blocks + " blok, " + others + " eşya/menü dokusu)");
-      await loadFont(); packUi();
+      await loadFont(); packUi(); skyTextures(); avatars.forEach(a => scene.remove(a.root)); avatars.clear();
       if (save) idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").put(file, "pack"); } catch (e) {} });
     } catch (err) {
       document.querySelectorAll(".packName").forEach(e => e.textContent = "Paket okunamadı: " + err.message);
@@ -368,7 +368,7 @@
   }
   document.querySelectorAll(".packPick").forEach(b => b.onclick = () => $("packFile").click());
   document.querySelectorAll(".packReset").forEach(b => b.onclick = () => {
-    userPack = null; resetTextures(); mcFont = null; packUi();
+    userPack = null; resetTextures(); mcFont = null; packUi(); skyTextures(); avatars.forEach(a => scene.remove(a.root)); avatars.clear();
     idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").delete("pack"); } catch (e) {} });
     document.querySelectorAll(".packName").forEach(e => e.textContent = "Varsayılan: Pixel Perfection CE");
     serverPack();
@@ -556,13 +556,13 @@
   const cv = $("cv");
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color("#78a7ff");
+  scene.background = null;
   scene.fog = new THREE.Fog("#a9c6ff", 45, 120);
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 300);
   /* Graphics settings (⚙), kept on this device: resolution as a share of the screen's, view distance, field of
      view, a frame cap to save battery, and an FPS counter. */
   const DPR = window.devicePixelRatio || 1;
-  const gfxDefault = { res: Math.round(Math.min(DPR, 1.25) / DPR * 20) * 5, view: 120, fov: 70, cap: 0, fps: false, bob: true };
+  const gfxDefault = { res: Math.round(Math.min(DPR, 1.25) / DPR * 20) * 5, view: 120, fov: 70, cap: 0, fps: false, bob: true, snd: 100, music: 50 };
   let gfx = gfxDefault;
   try { gfx = Object.assign({}, gfxDefault, JSON.parse(store.get("pisan-gfx") || "{}")); } catch (e) { }
   function applyGfx() {
@@ -571,13 +571,77 @@
     camera.fov = gfx.fov; camera.far = gfx.view + 40;
     if (typeof resize === "function") resize(); else camera.updateProjectionMatrix();
     $("fps").style.display = gfx.fps ? "block" : "none";
+    if (typeof music !== "undefined" && music) { music.volume = Math.min(1, gfx.music / 100 * gfx.snd / 100); if (!gfx.music || !gfx.snd) { music.pause(); music = null; } }
     store.set("pisan-gfx", JSON.stringify(gfx));
   }
   function resize() { const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); if (typeof handCam !== "undefined") { handCam.aspect = w / h; handCam.updateProjectionMatrix(); } }
   addEventListener("resize", resize);
   applyGfx();
+
+  // ---------- the sky: its colour by the time of day, sun, moon, stars and clouds (environment/*.png) ----------
+  const skyScene = new THREE.Scene(); skyScene.background = new THREE.Color("#78a7ff");
+  const skyCam = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
+  let dayTime = 6000, dayAt = 0, moonPhase = 0, raining = false;
+  const skyTex = (key, cb) => { if (!userPack || !userPack.get(key)) return cb(null); loadImg(key).then(cb); };
+  const skyMat = () => new THREE.MeshBasicMaterial({ transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, visible: false });
+  const sunMesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), skyMat()), moonMesh = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), skyMat());
+  skyScene.add(sunMesh, moonMesh);
+  const starGeo = new THREE.BufferGeometry(); { const r = rng(10842), pts = []; for (let i = 0; i < 1500; i++) { let x = r() * 2 - 1, y = r() * 2 - 1, z = r() * 2 - 1; const l = Math.hypot(x, y, z); if (l < 0.01 || l > 1) continue; pts.push(x / l * 100, y / l * 100, z / l * 100); } starGeo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3)); }
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false, fog: false }));
+  skyScene.add(stars);
+  const cloudMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.8, depthWrite: false, fog: false, side: THREE.DoubleSide, visible: false });
+  const clouds = new THREE.Mesh(new THREE.PlaneGeometry(2048, 2048), cloudMat); clouds.rotation.x = -Math.PI / 2; skyScene.add(clouds);
+  function skyTextures() {
+    const tex = img => { const t = new THREE.Texture(img); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.needsUpdate = true; return t; };
+    skyTex("environment/sun", img => { sunMesh.material.map = img ? tex(img) : null; sunMesh.material.visible = !!img; sunMesh.material.needsUpdate = true; });
+    skyTex("environment/moon_phases", img => { moonMesh.material.map = img ? tex(img) : null; moonMesh.material.visible = !!img; moonMesh.material.needsUpdate = true; if (img) moonUV(); });
+    skyTex("environment/clouds", img => {
+      if (!img) { cloudMat.visible = false; return; }
+      const t = tex(img); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2048 / 3072, 2048 / 3072);
+      cloudMat.map = t; cloudMat.visible = true; cloudMat.needsUpdate = true;
+    });
+  }
+  let shownPhase = -1;
+  function moonUV() {
+    if (shownPhase === moonPhase) return; shownPhase = moonPhase;
+    const col = moonPhase % 4, row = Math.floor(moonPhase / 4) % 2, uv = moonMesh.geometry.attributes.uv;
+    const u0 = col / 4, u1 = (col + 1) / 4, v1 = 1 - row / 2, v0 = 1 - (row + 1) / 2;
+    uv.setXY(0, u0, v1); uv.setXY(1, u1, v1); uv.setXY(2, u0, v0); uv.setXY(3, u1, v0); uv.needsUpdate = true;
+  }
+  const DAY_SKY = new THREE.Color("#78a7ff"), DAY_FOG = new THREE.Color("#c0d8ff"), NIGHT = new THREE.Color("#000000"), DUSK = new THREE.Color("#e8803a");
+  /* Minecraft's sun angle and light: noon at 6000, sunrise 0, sunset 12000; a day is 20 minutes. */
+  function updateSky(now) {
+    const time = dayTime + (dayAt ? (now - dayAt) / 50 : 0);
+    let f = ((time / 24000 - 0.25) % 1 + 1) % 1; f = (f * 2 + (0.5 - Math.cos(f * Math.PI) / 2)) / 3;
+    const a = f * Math.PI * 2;
+    let light = Math.max(0, Math.min(1, Math.cos(a) * 2 + 0.5));
+    if (raining) light *= 0.75;
+    const sky = NIGHT.clone().lerp(DAY_SKY, light);
+    // Sunrise and sunset glow on the fog near the horizon.
+    const dusk = Math.max(0, 1 - Math.abs(Math.cos(a)) * 2.5) * (raining ? 0.3 : 0.6);
+    const fog = NIGHT.clone().lerp(DAY_FOG, Math.max(light, 0.03)).lerp(DUSK, dusk);
+    skyScene.background.copy(sky).lerp(fog, 0.35); scene.fog.color.copy(fog);
+    const wl = Math.round((0.3 + 0.7 * light) * 50) / 50;
+    if (wl !== worldLight) { worldLight = wl; worldMats.forEach(m => m.color.setScalar(wl)); }
+    // Sun and moon on the east-west line, around the camera.
+    skyCam.position.copy(camera.position); skyCam.quaternion.copy(camera.quaternion); skyCam.fov = camera.fov; skyCam.aspect = camera.aspect; skyCam.updateProjectionMatrix();
+    const dir = new THREE.Vector3(-Math.sin(a), Math.cos(a), 0);
+    sunMesh.position.copy(camera.position).addScaledVector(dir, 100); sunMesh.lookAt(camera.position);
+    moonMesh.position.copy(camera.position).addScaledVector(dir, -100); moonMesh.lookAt(camera.position); moonUV();
+    sunMesh.material.opacity = moonMesh.material.opacity = raining ? 0 : 1;
+    stars.position.copy(camera.position); stars.rotation.z = a;
+    stars.material.opacity = raining ? 0 : Math.max(0, Math.min(1, 1 - (Math.cos(a) * 2 + 0.25))) * 0.5;
+    // Clouds at height 192, drifting east, 12 blocks per texture pixel.
+    clouds.position.set(camera.position.x, 192.33, camera.position.z);
+    if (cloudMat.map) {
+      const drift = (time * 0.03), s = 1 / 3072;
+      cloudMat.map.offset.set(((camera.position.x + drift) * s) % 1, (-camera.position.z * s) % 1);
+      cloudMat.color.setScalar(raining ? 0.6 * Math.max(0.2, light) : Math.max(0.15, light));
+    }
+  }
   const worldGroup = new THREE.Group(); scene.add(worldGroup);
-  function clearWorld() { while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); } }
+  function clearWorld() { worldMats.length = 0; while (worldGroup.children.length) { const c = worldGroup.children.pop(); c.geometry && c.geometry.dispose(); c.material && c.material.dispose && c.material.dispose(); } }
+  const worldMats = []; let worldLight = 1;
 
   const TRANSPARENT = n => n.includes("GLASS") || n.endsWith("_LEAVES") || n === "ICE" || n.includes("SLIME_BLOCK") || n.includes("HONEY_BLOCK") || n === "SPAWNER" || n.endsWith("_GRATE");
   const FLUID = n => n === "WATER" || n === "LAVA" || n === "BUBBLE_COLUMN";
@@ -678,6 +742,7 @@
       g.setIndex(b.idx);
       const t = key !== "o";
       const m = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: t, opacity: key === "w" ? 0.7 : 1, alphaTest: key === "t" ? 0.3 : 0, side: t ? THREE.DoubleSide : THREE.FrontSide, depthWrite: key !== "w" });
+      m.color.setScalar(worldLight); worldMats.push(m);
       const mesh = new THREE.Mesh(g, m); mesh.renderOrder = key === "w" ? 3 : (t ? 2 : 0); worldGroup.add(mesh);
     }
   }
@@ -722,11 +787,11 @@
     }
     return entry;
   }
-  function boxUV(geo, u, v, w, h, d) {
-    const S = 64, uvs = geo.attributes.uv;
-    const rect = (face, x0, y0, x1, y1) => { const a = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]; for (let i = 0; i < 4; i++) uvs.setXY(face * 4 + i, a[i][0] / S, 1 - a[i][1] / S); };
-    rect(0, u + d + w, v + d, u + d + w + d, v + d + h);       // +x: the player's left
-    rect(1, u, v + d, u + d, v + d + h);                       // -x: the player's right
+  function boxUV(geo, u, v, w, h, d, tw, th, mirror) {
+    const SW = tw || 64, SH = th || 64, uvs = geo.attributes.uv;
+    const rect = (face, x0, y0, x1, y1) => { if (mirror) [x0, x1] = [x1, x0]; const a = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]; for (let i = 0; i < 4; i++) uvs.setXY(face * 4 + i, a[i][0] / SW, 1 - a[i][1] / SH); };
+    rect(mirror ? 1 : 0, u + d + w, v + d, u + d + w + d, v + d + h);       // +x: the player's left
+    rect(mirror ? 0 : 1, u, v + d, u + d, v + d + h);                       // -x: the player's right
     rect(2, u + d, v, u + d + w, v + d);                       // top
     rect(3, u + d + w, v + d, u + d + w + w, v);               // bottom
     rect(4, u + d, v + d, u + d + w, v + d + h);               // front (+z)
@@ -763,7 +828,139 @@
   }
   // Mobs: tall thin ones as a player-shaped body in their colour, the rest as a body and a head.
   function mobColour(name) { const h = hashStr(name); return new THREE.Color().setHSL((h % 360) / 360, 0.35, 0.45); }
+
+  /* Minecraft's own mob models: boxes in model pixels (Minecraft's numbers, y down, front at -z), each part
+     turning about its pivot; drawn with the pack's entity textures. legs: [part, phase sign] swing as they walk. */
+  const P2 = Math.PI / 2;
+  const humanoid = (tex, th, arms) => ({ tex, tw: 64, th, h: 1.95, parts: [
+    { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8], [32, 0, -4, -8, -4, 8, 8, 8, 0.5]] },
+    { n: "body", at: [0, 0, 0], b: [[16, 16, -4, 0, -2, 8, 12, 4]] },
+    { n: "ra", at: [-5, 2, 0], rot: arms ? [-P2, 0, 0] : null, b: [[40, 16, -3, -2, -2, 4, 12, 4]] },
+    { n: "la", at: [5, 2, 0], rot: arms ? [-P2, 0, 0] : null, b: [th === 64 ? [32, 48, -1, -2, -2, 4, 12, 4] : [40, 16, -1, -2, -2, 4, 12, 4, 0, 1]] },
+    { n: "rl", at: [-1.9, 12, 0], b: [[0, 16, -2, 0, -2, 4, 12, 4]] },
+    { n: "ll", at: [1.9, 12, 0], b: [th === 64 ? [16, 48, -2, 0, -2, 4, 12, 4] : [0, 16, -2, 0, -2, 4, 12, 4, 0, 1]] }],
+    legs: arms ? [["rl", 1], ["ll", -1]] : [["rl", 1], ["ll", -1], ["ra", -1], ["la", 1]] });
+  const skeleton = (tex, scale) => ({ tex, tw: 64, th: 32, h: 1.99, scale, parts: [
+    { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8], [32, 0, -4, -8, -4, 8, 8, 8, 0.5]] },
+    { n: "body", at: [0, 0, 0], b: [[16, 16, -4, 0, -2, 8, 12, 4]] },
+    { n: "ra", at: [-5, 2, 0], b: [[40, 16, -1, -2, -1, 2, 12, 2]] },
+    { n: "la", at: [5, 2, 0], b: [[40, 16, -1, -2, -1, 2, 12, 2, 0, 1]] },
+    { n: "rl", at: [-2, 12, 0], b: [[0, 16, -1, 0, -1, 2, 12, 2]] },
+    { n: "ll", at: [2, 12, 0], b: [[0, 16, -1, 0, -1, 2, 12, 2, 0, 1]] }],
+    legs: [["rl", 1], ["ll", -1], ["ra", -1], ["la", 1]] });
+  const quadLegs = (legU, legV, legH, at, mirrorLeft) => ["rh", "lh", "rf", "lf"].map((n, k) => ({ n, at: at[k], b: [[legU, legV, -2, 0, -2, 4, legH, 4, 0, mirrorLeft && k % 2 ? 1 : 0]] }));
+  const QUAD_LEGS = [["rh", 1], ["lh", -1], ["rf", -1], ["lf", 1]];
+  const spiderDef = (tex, scale) => {
+    const parts = [
+      { n: "head", at: [0, 15, -3], b: [[32, 4, -4, -4, -8, 8, 8, 8]] },
+      { n: "neck", at: [0, 15, 0], b: [[0, 0, -3, -3, -3, 6, 6, 6]] },
+      { n: "body", at: [0, 15, 9], b: [[0, 12, -5, -4, -6, 10, 8, 12]] }];
+    const ys = [0.7854, 0.3927, -0.3927, -0.7854], zs = [-0.7854, -0.5812, -0.5812, -0.7854];
+    [2, 1, 0, -1].forEach((z, k) => {
+      parts.push({ n: "r" + k, at: [-4, 15, z], rot: [0, ys[k], zs[k]], b: [[18, 0, -15, -1, -1, 16, 2, 2]] });
+      parts.push({ n: "l" + k, at: [4, 15, z], rot: [0, -ys[k], -zs[k]], b: [[18, 0, -1, -1, -1, 16, 2, 2]] });
+    });
+    return { tex, tw: 64, th: 32, h: 0.9, scale, parts, legs: [] };
+  };
+  const cowDef = tex => ({ tex, tw: 64, th: 32, h: 1.4, parts: [
+    { n: "head", at: [0, 4, -8], b: [[0, 0, -4, -4, -6, 8, 8, 6], [22, 0, -5, -5, -4, 1, 3, 1], [22, 0, 4, -5, -4, 1, 3, 1]] },
+    { n: "body", at: [0, 5, 2], rot: [P2, 0, 0], b: [[18, 4, -6, -10, -7, 12, 18, 10], [52, 0, -2, 2, -8, 4, 6, 1]] },
+    ...quadLegs(0, 16, 12, [[-4, 12, 7], [4, 12, 7], [-4, 12, -6], [4, 12, -6]], true)], legs: QUAD_LEGS });
+  const MOBS = {
+    zombie: humanoid("entity/zombie/zombie", 64, true),
+    husk: humanoid("entity/zombie/husk", 64, true),
+    drowned: humanoid("entity/zombie/drowned", 64, true),
+    skeleton: skeleton("entity/skeleton/skeleton"),
+    stray: skeleton("entity/skeleton/stray"),
+    wither_skeleton: Object.assign(skeleton("entity/skeleton/wither_skeleton"), { h: 2.4 }),
+    creeper: { tex: "entity/creeper/creeper", tw: 64, th: 32, h: 1.7, parts: [
+      { n: "head", at: [0, 6, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8]] },
+      { n: "body", at: [0, 6, 0], b: [[16, 16, -4, 0, -2, 8, 12, 4]] },
+      ...quadLegs(0, 16, 6, [[-2, 18, 4], [2, 18, 4], [-2, 18, -4], [2, 18, -4]])], legs: QUAD_LEGS },
+    spider: spiderDef("entity/spider/spider"),
+    cave_spider: Object.assign(spiderDef("entity/spider/cave_spider"), { h: 0.5 }),
+    enderman: { tex: "entity/enderman/enderman", tw: 64, th: 32, h: 2.9, parts: [
+      { n: "head", at: [0, -14, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8, -0.5], [0, 16, -4, -8, -4, 8, 8, 8, -0.5]] },
+      { n: "body", at: [0, -14, 0], b: [[32, 16, -4, 0, -2, 8, 12, 4]] },
+      { n: "ra", at: [-5, -12, 0], b: [[56, 0, -1, -2, -1, 2, 30, 2]] },
+      { n: "la", at: [5, -12, 0], b: [[56, 0, -1, -2, -1, 2, 30, 2, 0, 1]] },
+      { n: "rl", at: [-2, -5, 0], b: [[56, 0, -1, 0, -1, 2, 30, 2]] },
+      { n: "ll", at: [2, -5, 0], b: [[56, 0, -1, 0, -1, 2, 30, 2, 0, 1]] }],
+      legs: [["rl", 0.5], ["ll", -0.5], ["ra", -0.5], ["la", 0.5]] },
+    pig: { tex: "entity/pig/pig", tw: 64, th: 32, h: 0.9, parts: [
+      { n: "head", at: [0, 12, -6], b: [[0, 0, -4, -4, -8, 8, 8, 8], [16, 16, -2, 0, -9, 4, 3, 1]] },
+      { n: "body", at: [0, 11, 2], rot: [P2, 0, 0], b: [[28, 8, -5, -10, -7, 10, 16, 8]] },
+      ...quadLegs(0, 16, 6, [[-3, 18, 7], [3, 18, 7], [-3, 18, -5], [3, 18, -5]])], legs: QUAD_LEGS },
+    cow: cowDef("entity/cow/cow"),
+    mooshroom: cowDef("entity/cow/red_mooshroom"),
+    sheep: { tex: "entity/sheep/sheep", tex2: "entity/sheep/sheep_fur", tw: 64, th: 32, h: 1.3, parts: [
+      { n: "head", at: [0, 6, -8], b: [[0, 0, -3, -4, -6, 6, 6, 8], [0, 0, -3, -4, -4, 6, 6, 6, 0.6, 0, 1]] },
+      { n: "body", at: [0, 5, 2], rot: [P2, 0, 0], b: [[28, 8, -4, -10, -7, 8, 16, 6], [28, 8, -4, -10, -7, 8, 16, 6, 1.75, 0, 1]] },
+      ...["rh", "lh", "rf", "lf"].map((n, k) => ({ n, at: [[-3, 12, 7], [3, 12, 7], [-3, 12, -5], [3, 12, -5]][k], b: [[0, 16, -2, 0, -2, 4, 12, 4], [0, 16, -2, 0, -2, 4, 6, 4, 0.5, 0, 1]] }))], legs: QUAD_LEGS },
+    chicken: { tex: "entity/chicken", tw: 64, th: 32, h: 0.7, parts: [
+      { n: "head", at: [0, 15, -4], b: [[0, 0, -2, -6, -2, 4, 6, 3], [14, 0, -2, -4, -4, 4, 2, 2], [14, 4, -1, -2, -3, 2, 2, 2]] },
+      { n: "body", at: [0, 16, 0], rot: [P2, 0, 0], b: [[0, 9, -3, -4, -3, 6, 8, 6]] },
+      { n: "rl", at: [-2, 19, 1], b: [[26, 0, -1, 0, -3, 3, 5, 3]] },
+      { n: "ll", at: [1, 19, 1], b: [[26, 0, -1, 0, -3, 3, 5, 3]] },
+      { n: "rw", at: [-4, 13, 0], b: [[24, 13, 0, 0, -3, 1, 4, 6]] },
+      { n: "lw", at: [4, 13, 0], b: [[24, 13, -1, 0, -3, 1, 4, 6]] }], legs: [["rl", 1], ["ll", -1]] },
+    wolf: { tex: "entity/wolf/wolf", tw: 64, th: 32, h: 0.85, parts: [
+      { n: "head", at: [-1, 13.5, -7], b: [[0, 0, -2, -3, -2, 6, 6, 4], [16, 14, -2, -5, 0, 2, 2, 1], [16, 14, 2, -5, 0, 2, 2, 1], [0, 10, -0.5, 0, -5, 3, 3, 4]] },
+      { n: "body", at: [0, 14, 2], rot: [P2, 0, 0], b: [[18, 14, -3, -2, -3, 6, 9, 6]] },
+      { n: "mane", at: [-1, 14, 2], rot: [P2, 0, 0], b: [[21, 0, -3, -3, -3, 8, 6, 7]] },
+      { n: "tail", at: [-1, 12, 8], rot: [1.25, 0, 0], b: [[9, 18, 0, 0, -1, 2, 8, 2]] },
+      ...["rh", "lh", "rf", "lf"].map((n, k) => ({ n, at: [[-2.5, 16, 7], [0.5, 16, 7], [-2.5, 16, -4], [0.5, 16, -4]][k], b: [[0, 18, 0, 0, -1, 2, 8, 2]] }))], legs: QUAD_LEGS },
+    villager: { tex: "entity/villager/villager", tw: 64, th: 64, h: 1.95, parts: [
+      { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -10, -4, 8, 10, 8], [24, 0, -1, -3, -6, 2, 4, 2]] },
+      { n: "body", at: [0, 0, 0], b: [[16, 20, -4, 0, -3, 8, 12, 6], [0, 38, -4, 0, -3, 8, 18, 6, 0.5]] },
+      { n: "arms", at: [0, 3, -1], rot: [-0.75, 0, 0], b: [[44, 22, -8, -2, -2, 4, 8, 4], [44, 22, 4, -2, -2, 4, 8, 4, 0, 1], [40, 38, -4, 2, -2, 8, 4, 4]] },
+      { n: "rl", at: [-2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4]] },
+      { n: "ll", at: [2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4, 0, 1]] }], legs: [["rl", 1], ["ll", -1]] },
+    iron_golem: { tex: "entity/iron_golem/iron_golem", tw: 128, th: 128, h: 2.7, parts: [
+      { n: "head", at: [0, -7, -2], b: [[0, 0, -4, -12, -5.5, 8, 10, 8], [24, 0, -1, -5, -7.5, 2, 4, 2]] },
+      { n: "body", at: [0, -7, 0], b: [[0, 40, -9, -2, -6, 18, 12, 11], [0, 70, -4.5, 10, -3, 9, 5, 6, 0.5]] },
+      { n: "ra", at: [0, -7, 0], b: [[60, 21, -13, -2.5, -3, 4, 30, 6]] },
+      { n: "la", at: [0, -7, 0], b: [[60, 58, 9, -2.5, -3, 4, 30, 6]] },
+      { n: "rl", at: [-4, 11, 0], b: [[37, 0, -3.5, -3, -3, 6, 16, 5]] },
+      { n: "ll", at: [5, 11, 0], b: [[60, 0, -3.5, -3, -3, 6, 16, 5]] }], legs: [["rl", 0.6], ["ll", -0.6], ["ra", -0.4], ["la", 0.4]] },
+    slime: { tex: "entity/slime/slime", tw: 64, th: 32, h: 0.52, size: "w", translucent: true, parts: [
+      { n: "body", at: [0, 0, 0], b: [[0, 16, -3, 17, -3, 6, 6, 6], [0, 0, -4, 16, -4, 8, 8, 8]] }], legs: [] },
+  };
+  function modelMat(key, colour, translucent) {
+    const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, alphaTest: translucent ? 0.05 : 0.5, depthWrite: !translucent });
+    if (userPack && userPack.get(key)) loadImg(key).then(img => { if (!img) return; const t = new THREE.Texture(img); t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; mat.map = t; mat.color.setScalar(worldLight); mat.needsUpdate = true; });
+    return mat;
+  }
+  function buildMob(def, p) {
+    const col = mobColour(p.name), mats = [modelMat(def.tex, col, def.translucent)];
+    if (def.tex2) mats.push(modelMat(def.tex2, 0xffffff));
+    const root = new THREE.Group(), model = new THREE.Group(); root.add(model);
+    // Grown-ups by their height, babies smaller, slimes by their size.
+    let k = def.size === "w" ? Math.max(0.2, p.w) / 0.52 : Math.max(0.3, Math.min(1.6, (p.h || def.h) / def.h)) * (def.scale || 1);
+    if (def.scale && !p.h) k = def.scale;
+    model.scale.setScalar(k); model.position.y = 0;
+    const inner = new THREE.Group(); inner.position.y = 24 * PX; model.add(inner);
+    const parts = {};
+    for (const part of def.parts) {
+      const g = new THREE.Group(); g.position.set(part.at[0] * PX, -part.at[1] * PX, -part.at[2] * PX);
+      if (part.rot) { g.rotation.order = "ZYX"; g.rotation.set(part.rot[0], -part.rot[1], -part.rot[2]); }
+      for (const b of part.b) {
+        const [u, v, x0, y0, z0, w, h, d, inf = 0, mir = 0, mi = 0] = b;
+        const geo = new THREE.BoxGeometry((w + 2 * inf) * PX, (h + 2 * inf) * PX, (d + 2 * inf) * PX);
+        boxUV(geo, u, v, w, h, d, def.tw, def.th, !!mir);
+        const m = new THREE.Mesh(geo, mats[mi] || mats[0]); m.position.set((x0 + w / 2) * PX, -(y0 + h / 2) * PX, -(z0 + d / 2) * PX);
+        g.add(m);
+      }
+      inner.add(g); parts[part.n] = g;
+    }
+    if (p.skin) { const tag = nameTag(p.skin, -1); tag.position.y = def.h * k + 0.35; root.add(tag); }
+    scene.add(root);
+    const legs = def.legs.map(([n]) => parts[n]).filter(Boolean), signs = def.legs.map(([, sg]) => sg);
+    const head = parts.head || new THREE.Group();
+    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats };
+  }
   function makeMob(p) {
+    if (MOBS[p.name]) return buildMob(MOBS[p.name], p);
     const root = new THREE.Group();
     const col = mobColour(p.name), dark = col.clone().multiplyScalar(0.7);
     const mat = new THREE.MeshBasicMaterial({ color: col }), headMat = new THREE.MeshBasicMaterial({ color: dark });
@@ -927,11 +1124,13 @@
         clearInterval(wakeTimer); wakeStart = 0; $("loginErr").style.color = "";
         myName = o.name; myId = o.me; playing = true; me.ready = false; snaps = []; clockOff = null; hudKey = "";
         $("loginErr").textContent = ""; $("chat").innerHTML = ""; closeOverlay();
-        show("game"); resize();
+        show("game"); resize(); scheduleMusic((30 + Math.random() * 60) * 1000);
         break;
       case "world": lastWorld = o; buildWorld(o); break;
       case "blocks": applyBlocks(o.list); break;
-      case "s": addSnap(o); hud(o); break;
+      case "s": addSnap(o); hud(o); if (o.time !== undefined) { dayTime = o.time; dayAt = performance.now(); moonPhase = o.mp || 0; } raining = !!o.rain; break;
+      case "snd": playSound(o.n, [o.x, o.y, o.z], o.v, o.p); break;
+      case "blk": playSound(blockSound(o.n, o.k), [o.x, o.y, o.z], 1, 0.8); break;
       case "hotbar": hotbar(o); break;
       case "texts": setTexts(o.list); break;
       case "text": onText(o.kind, o.json); break;
@@ -1053,6 +1252,112 @@
     fontify($("score"));
   }
 
+
+  // ---------- sounds: Minecraft's own (sounds.json + .ogg files, fetched through the relay from Mojang) ----------
+  let audio = null, soundsJson = null; const sndBuffers = new Map();
+  function audioCtx() {
+    if (!audio) { try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (audio.state === "suspended") audio.resume().catch(() => { });
+    return audio;
+  }
+  document.addEventListener("pointerdown", () => audioCtx(), { capture: true });
+  fetch("/sounds.json").then(r => r.ok ? r.json() : null).then(j => { soundsJson = j; }).catch(() => { });
+  function pickSound(event, depth) {
+    const e = soundsJson && soundsJson[String(event).replace(/^minecraft:/, "")];
+    if (!e || !e.sounds || !e.sounds.length || depth > 3) return null;
+    const list = e.sounds.map(x => typeof x === "string" ? { name: x } : x);
+    let total = list.reduce((a, x) => a + (x.weight || 1), 0), r = Math.random() * total, pick = list[0];
+    for (const x of list) { r -= x.weight || 1; if (r <= 0) { pick = x; break; } }
+    if (pick.type === "event") return pickSound(pick.name, (depth || 0) + 1);
+    return { name: pick.name.replace(/^minecraft:/, ""), volume: pick.volume ?? 1, pitch: pick.pitch ?? 1, stream: !!pick.stream };
+  }
+  function sndBuffer(name) {
+    if (!sndBuffers.has(name)) sndBuffers.set(name, fetch("/snd/" + name + ".ogg").then(r => r.ok ? r.arrayBuffer() : null).then(b => b && new Promise(res => audio.decodeAudioData(b, res, () => res(null)))).catch(() => null));
+    return sndBuffers.get(name);
+  }
+  /* As Minecraft: heard up to 16 blocks (further when louder), fading with distance, panned left and right. */
+  async function playSound(event, pos, volume, pitch) {
+    const ctx = audioCtx(); if (!ctx || !soundsJson || !gfx.snd) return;
+    const f = pickSound(event); if (!f) return;
+    const v = (volume ?? 1);
+    let gain = Math.min(1, v) * f.volume, pan = 0;
+    if (pos) {
+      const cp = camera.position, dx = pos[0] - cp.x, dy = pos[1] - cp.y, dz = pos[2] - cp.z, dist = Math.hypot(dx, dy, dz), range = 16 * Math.max(1, v);
+      if (dist > range) return;
+      gain *= 1 - dist / range;
+      if (dist > 0.5) { const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion); pan = Math.max(-1, Math.min(1, (dx * right.x + dy * right.y + dz * right.z) / dist)) * 0.8; }
+    }
+    const buf = await sndBuffer(f.name); if (!buf) return;
+    const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = Math.max(0.5, Math.min(2, (pitch ?? 1) * f.pitch));
+    const g = ctx.createGain(); g.gain.value = gain * gfx.snd / 100;
+    let node = src.connect(g);
+    if (ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = pan; node = g.connect(p); } else node = g;
+    node.connect(ctx.destination); src.start();
+  }
+  /* A block's sound group, as Minecraft's sound types name them. */
+  function soundType(n) {
+    n = String(n || "").toLowerCase();
+    if (/grass_block|_leaves|^grass$|short_grass|tall_grass|fern|hay_block|moss|azalea|vine|sugar_cane|kelp|seagrass|flower|tulip|poppy|dandelion|sapling/.test(n)) return "grass";
+    if (/slime/.test(n)) return "slime_block";
+    if (/honey/.test(n)) return "honey_block";
+    if (/^dirt$|coarse_dirt|gravel|farmland|podzol|clay$|mycelium|rooted_dirt|dirt_path/.test(n)) return "gravel";
+    if (/soul_sand/.test(n)) return "soul_sand";
+    if (/sand|concrete_powder/.test(n)) return "sand";
+    if (/ladder/.test(n)) return "ladder";
+    if (/wool|carpet/.test(n)) return "wool";
+    if (/snow/.test(n)) return "snow";
+    if (/glass|sea_lantern|glowstone|^ice$|packed_ice|blue_ice|beacon/.test(n)) return "glass";
+    if (/planks|_log$|_wood$|stripped|bookshelf|crafting_table|chest|barrel|oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|bamboo|crimson|warped|note_block|jukebox|composter|lectern|loom|cartography|fletching|smithing/.test(n) && !/leaves|sapling/.test(n)) return "wood";
+    if (/iron_block|gold_block|diamond_block|emerald_block|netherite_block|iron_bars|iron_door|iron_trapdoor|anvil|hopper|cauldron|lantern|chain|bell/.test(n)) return "metal";
+    if (/netherrack|nether_gold_ore|nether_quartz_ore/.test(n)) return "netherrack";
+    if (/nether_bricks/.test(n)) return "nether_bricks";
+    if (/deepslate/.test(n)) return "deepslate";
+    if (/amethyst/.test(n)) return "amethyst_block";
+    if (/copper/.test(n)) return "copper";
+    return "stone";
+  }
+  function blockSound(n, kind) {
+    const t = soundType(n);
+    if (kind === "step" && (t === "glass")) return "block.stone.step";
+    if (t === "glass" && kind === "place") return "block.glass.place";
+    return "block." + t + "." + kind;
+  }
+  function blockNameAt(bx, by, bz) {
+    if (!region) return null;
+    const x = bx - region.x0, y = by - region.y0, z = bz - region.z0;
+    if (x < 0 || y < 0 || z < 0 || x >= region.nx || y >= region.ny || z >= region.nz) return null;
+    const id = region.ids[(y * region.nz + z) * region.nx + x];
+    return id ? region.pal[id].n : null;
+  }
+  // Our own footsteps (everyone else's come from the server), one every 1/0.6 blocks walked, as in Minecraft.
+  let stepDist = 0, nextStep = 1, stepLast = null;
+  function footsteps() {
+    const x = me.rx ?? me.x, z = me.rz ?? me.z;
+    if (!stepLast) stepLast = { x, z };
+    const d = Math.hypot(x - stepLast.x, z - stepLast.z); stepLast = { x, z };
+    if (d > 2 || !me.ground || me.sneak || spectating) return;
+    stepDist += d * 0.6;
+    if (stepDist > nextStep) {
+      nextStep = stepDist + 1;
+      let n = blockNameAt(Math.floor(x), Math.floor(me.y - 0.2), Math.floor(z));
+      if (!n || n === "AIR") n = blockNameAt(Math.floor(x), Math.floor(me.y - 1.2), Math.floor(z));
+      if (n && n !== "AIR") playSound(blockSound(n, "step"), null, 0.15, 1);
+    }
+  }
+  // Buttons click as Minecraft's do.
+  document.addEventListener("pointerdown", e => { if (e.target.closest && e.target.closest(".mcbtn, #top .tb")) playSound("ui.button.click", null, 0.25, 1); }, true);
+  // Background music now and then, as in Minecraft (music.game while playing).
+  var music = null, musicTimer = 0;
+  function scheduleMusic(ms) {
+    clearTimeout(musicTimer);
+    musicTimer = setTimeout(() => {
+      if (!playing || !gfx.music || !gfx.snd || !soundsJson) return scheduleMusic(60000);
+      const f = pickSound("music.game"); if (!f) return scheduleMusic(60000);
+      music = new Audio("/snd/" + f.name + ".ogg"); music.volume = Math.min(1, gfx.music / 100 * gfx.snd / 100);
+      music.onended = () => { music = null; scheduleMusic((4 + Math.random() * 6) * 60000); };
+      music.play().catch(() => { music = null; scheduleMusic(60000); });
+    }, ms);
+  }
   // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
   const ITEM_ALIAS = { compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
   /* Item icons as Minecraft draws them: flat items from the item textures, blocks as little 3D cubes. */
@@ -1336,6 +1641,9 @@
     slider("Görüş mesafesi", "view", 24, 160, 8, v => v + " blok");
     slider("Görüş açısı (FOV)", "fov", 50, 110, 5, v => v + "°");
     slider("Kare sınırı", "cap", 0, 60, 30, v => v ? v + " FPS (pil tasarrufu)" : "Sınırsız");
+    const sh = document.createElement("h3"); sh.textContent = "Ses"; sh.style.marginTop = "12px"; p.appendChild(sh);
+    slider("Ana ses", "snd", 0, 100, 5, v => v ? "%" + v : "Kapalı");
+    slider("Müzik", "music", 0, 100, 5, v => v ? "%" + v : "Kapalı");
     const fl = document.createElement("label"); fl.style.cssText = "color:#333;display:block;margin-top:8px";
     const fc = document.createElement("input"); fc.type = "checkbox"; fc.checked = gfx.fps; fc.onchange = () => { gfx.fps = fc.checked; applyGfx(); };
     fl.appendChild(fc); fl.appendChild(document.createTextNode(" FPS göster")); p.appendChild(fl);
@@ -1529,10 +1837,14 @@
         a.root.position.set(px, py, pz);
         a.root.rotation.y = -yawDeg * Math.PI / 180;
         if (a.item) { a.body.rotation.y += dt * 2; a.body.position.y = 0.2 + Math.sin(now / 320) * 0.06; continue; }
-        if (a.mats) { const hurt = a.hurtAt && now - a.hurtAt < 500; if (hurt !== !!a.red) { a.red = hurt; a.mats.forEach(m => m.color.setRGB(1, hurt ? 0.45 : 1, hurt ? 0.45 : 1)); } }
+        if (a.mats) {
+          // Darker at night like the world around them, red for a moment when hit.
+          const hurt = a.hurtAt && now - a.hurtAt < 500, key = worldLight + (hurt ? "h" : "");
+          if (key !== a.lit) { a.lit = key; a.mats.forEach(m => { if (m.map || !a.mob) m.color.setRGB(worldLight, (hurt ? 0.45 : 1) * worldLight, (hurt ? 0.45 : 1) * worldLight); }); }
+        }
         if (isMe) fpSetSkin(p.skin, p.team);
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
-        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = k % 2 ? swing : -swing); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
+        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing * 1.4 : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
         // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
         if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.y = -10 * PX; a.armR.add(a.heldMesh); } }
@@ -1572,8 +1884,9 @@
     const xp = $("xp");
     if (charge >= 0) { const p = Math.min(1, (performance.now() - charge) / 1200); xp.firstChild.style.width = (p * 100) + "%"; xp.classList.toggle("power", p >= 1); }
     else { xp.firstChild.style.width = "0"; xp.classList.remove("power"); }
-    stepAnims();
-    renderer.render(scene, camera);
+    stepAnims(); updateSky(now); if (me.ready) footsteps();
+    renderer.render(skyScene, skyCam);
+    renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
     if (!thirdPerson && !cam && me.ready) {
       fpPose(now, dt);
       renderer.autoClear = false; renderer.clearDepth(); renderer.render(handScene, handCam); renderer.autoClear = true;
