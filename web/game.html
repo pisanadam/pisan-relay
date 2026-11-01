@@ -345,7 +345,7 @@
       const map = new Map();
       const jobs = [];
       zip.forEach((path, entry) => {
-        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment|entity|models\/armor|painting)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
+        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment|entity|models\/armor|painting|misc)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
         if (m && (m[1] !== "block" || !m[2].includes("/"))) {
           // Block textures by bare name (as the world asks for them), everything else by folder/name.
           const meta = !!m[3], key = (m[1] === "block" && !meta ? m[2] : m[1] + "/" + m[2]) + (meta ? ".mcmeta" : "");
@@ -795,11 +795,27 @@
       const img = new Image();
       img.onload = () => {
         const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
-        g.drawImage(img, 0, 0);
-        if (img.height === 32) { g.drawImage(img, 0, 16, 16, 16, 16, 48, 16, 16); g.drawImage(img, 40, 16, 16, 16, 32, 48, 16, 16); }
+        const W = img.width || 64, legacy = img.height === W / 2;
+        g.drawImage(img, 0, 0, 64, legacy ? 32 : 64);
+        // Old 64×32 skins: the left arm and leg are the right ones mirrored, as Minecraft builds them.
+        if (legacy) {
+          const flip = (sx, sy, w, h, dx, dy) => { g.save(); g.translate(dx + w, dy); g.scale(-1, 1); g.drawImage(c, sx, sy, w, h, 0, 0, w, h); g.restore(); };
+          for (const [x0, y0, dx, dy] of [[0, 16, 16, 48], [40, 16, 32, 48]]) {
+            flip(x0 + 4, y0, 4, 4, dx + 4, dy); flip(x0 + 8, y0, 4, 4, dx + 8, dy);
+            flip(x0, y0 + 4, 4, 12, dx + 8, dy + 4); flip(x0 + 4, y0 + 4, 4, 12, dx + 4, dy + 4); flip(x0 + 8, y0 + 4, 4, 12, dx, dy + 4); flip(x0 + 12, y0 + 4, 4, 12, dx + 12, dy + 4);
+          }
+        }
+        // Minecraft's own clean-up: the base layer is solid; an old skin's hat layer that has no see-through
+        // pixel at all is dropped (many old skins fill it with black).
+        const d = g.getImageData(0, 0, 64, 64), A = (x, y) => (y * 64 + x) * 4 + 3;
+        const solid = (x0, y0, x1, y1) => { for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) d.data[A(x, y)] = 255; };
+        if (legacy) { let any = false; for (let y = 0; y < 16 && !any; y++) for (let x = 32; x < 64; x++) if (d.data[A(x, y)] < 128) { any = true; break; } if (!any) for (let y = 0; y < 16; y++) for (let x = 32; x < 64; x++) d.data[A(x, y)] = 0; }
+        solid(0, 0, 32, 16); solid(0, 16, 64, 32); solid(16, 48, 48, 64);
+        g.putImageData(d, 0, 0);
         entry.tex.image = c; entry.tex.needsUpdate = true;
       };
-      img.src = "/skin/" + encodeURIComponent(key);
+      // "#hash": the skin the server gave this player (from the player list); otherwise a name for Mojang.
+      img.src = key.startsWith("#") ? "/skinhash/" + key.slice(1) : "/skin/" + encodeURIComponent(key);
     }
     return entry;
   }
@@ -1333,8 +1349,8 @@
     if (md.chest) L.chest = true;
     if (n === "snow_golem") L.pumpkin = ((md.pumpkin ?? 16) & 16) !== 0;
     // Horse armour: worn in the body slot; Minecraft draws it over the horse, a little larger.
-    const body = p.ar && p.ar[1] ? p.ar[1].split("#") : null, hm = body && body[0].match(/^(leather|iron|golden|diamond)_horse_armor$/);
-    if (hm && n === "horse") L.overlay = { key: "entity/horse/armor/horse_armor_" + (hm[1] === "golden" ? "gold" : hm[1]), tint: hm[1] === "leather" ? (body[1] ? +body[1] : 0xA06540) : null, inflate: 0.1 };
+    const body = p.ar && p.ar[1] ? parseSpec(p.ar[1]) : null, hm = body && body.name.match(/^(leather|iron|golden|diamond)_horse_armor$/);
+    if (hm && n === "horse") L.overlay = { key: "entity/horse/armor/horse_armor_" + (hm[1] === "golden" ? "gold" : hm[1]), tint: hm[1] === "leather" ? (body.x.c !== undefined ? +body.x.c : 0xA06540) : null, inflate: 0.1 };
     return L;
   }
   /* A mob's look as one key, so it is rebuilt only when that changes. */
@@ -1382,10 +1398,12 @@
       const s = a.slots[slot]; if (!s) return;
       const geo = new THREE.BoxGeometry((w + inf * 2) * PX, (h + inf * 2) * PX, (d + inf * 2) * PX); boxUV(geo, u, v, w, h, d, 64, 32, mirror);
       const m = new THREE.Mesh(geo, mat); m.position.set(s[1] * PX, s[2] * PX, s[3] * PX); s[0].add(m); a.armour.push(m);
+      if (glint) addGlint(m);
     };
+    let glint = false;
     ar.forEach((it, i) => {
       if (!it) return;
-      const nm = it.split("#")[0];
+      const nm = parseSpec(it).name;
       // Heads and carved pumpkins on the head, elytra on the back: as Minecraft wears them.
       if (i === 0 && /(_skull|_head)$/.test(nm) && a.slots.head) {
         const s = a.slots.head, o = new THREE.Group(); o.position.set(s[1] * PX, (s[2] - 4) * PX, s[3] * PX); o.scale.setScalar(1.1875); s[0].add(o); a.armour.push(o);
@@ -1401,9 +1419,10 @@
         flipParts(o, [{ at: [5, 0, 0], rot: [0.2618, 0, -0.2618], b: [[22, 0, -10, 0, 0, 10, 20, 2, 1]] }, { at: [-5, 0, 0], rot: [0.2618, 0, 0.2618], b: [[22, 0, 0, 0, 0, 10, 20, 2, 1, 1]] }], 64, 32, [texMat("entity/elytra")]);
         return;
       }
-      const [name, col] = it.split("#"), mm = name.match(/^(leather|chainmail|iron|golden|diamond|netherite|turtle)_(helmet|chestplate|leggings|boots)$/) || (name === "turtle_helmet" ? [0, "turtle", "helmet"] : null);
+      const { name, x: ax } = parseSpec(it), col = ax.c, mm = name.match(/^(leather|chainmail|iron|golden|diamond|netherite|turtle)_(helmet|chestplate|leggings|boots)$/) || (name === "turtle_helmet" ? [0, "turtle", "helmet"] : null);
       if (!mm) return;
-      const mat = ARMOUR_MAT[mm[1]], tint = mm[1] === "leather" ? (col ? +col : 0xA06540) : null;
+      const mat = ARMOUR_MAT[mm[1]], tint = mm[1] === "leather" ? (col !== undefined ? +col : 0xA06540) : null;
+      glint = !!ax.g;
       const m1 = armourMat(mat + "_layer_1", tint), m2 = armourMat(mat + "_layer_2", tint);
       if (i === 0) piece("head", 0, 0, 8, 8, 8, 1, m1);
       if (i === 1) { piece("body", 16, 16, 8, 12, 4, 1, m1); piece("ra", 40, 16, 4, 12, 4, 1, m1); piece("la", 40, 16, 4, 12, 4, 1, m1, true); }
@@ -1450,6 +1469,7 @@
     scene.add(root);
     const legs = def.legs.map(([n]) => parts[n]).filter(Boolean), signs = def.legs.map(([, sg]) => sg);
     const head = parts.head || new THREE.Group();
+    const headBase = head.rotation.x; head.rotation.order = "YXZ"; head.rotation.x = headBase;
     if (baby && def.legs === QUAD_LEGS) head.scale.setScalar(1.5);
     // A snow golem's carved pumpkin: the block, a little smaller than the head.
     if (look.pumpkin && parts.head) {
@@ -1467,7 +1487,7 @@
     // Wings flap (about their own axis), blaze rods and the like turn.
     const flaps = (def.flap || []).filter(([n]) => parts[n]).map(([n, ax, amp, speed]) => [parts[n], ax, amp, speed || 1, parts[n].rotation[ax]]);
     const spins = (def.spin || []).filter(n => parts[n]).map(n => parts[n]);
-    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats, flaps, spins, hover: def.hover || 0, slots, look: lookKey(p), handPart: parts.ra || null };
+    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats, flaps, spins, hover: def.hover || 0, slots, look: lookKey(p), handPart: parts.ra || null, headBase };
   }
 
   const boatDef = tex => ({ tex, tw: 128, th: 64, h: 0.5625, originY: 0.375, rotY: P2, parts: [
@@ -1519,7 +1539,7 @@
       root.mats = [mat];
     } else return null;
     scene.add(root);
-    return { root, body, head: new THREE.Group(), legs: [], phase: 0, x: p.x, z: p.z, mob: true, mats: root.mats || [], flaps: [], spins: [], look: lookKey(p), tilt, still: /item_frame|painting/.test(p.name) };
+    return { root, body, head: new THREE.Group(), legs: [], phase: 0, x: p.x, z: p.z, mob: true, thing: true, mats: root.mats || [], flaps: [], spins: [], look: lookKey(p), tilt, still: /item_frame|painting/.test(p.name) };
   }
   function makeMob(p) {
     const thing = makeThing(p); if (thing) return thing;
@@ -1560,19 +1580,28 @@
     if (p.kind === "i") return makeItemEntity(p);
     const entry = skinTexture(p.skin, p.team);
     const mat = new THREE.MeshBasicMaterial({ map: entry.tex, transparent: true, alphaTest: 0.5 });
+    // Minecraft's player model: pivots and boxes in its own pixels (y up here, neck at 24), with the skin's
+    // outer layer (hat, jacket, sleeves, trousers) over each part, and 3-pixel arms for slim skins.
     const root = new THREE.Group();
     const body = new THREE.Group(); root.add(body);
-    const head = new THREE.Group(); head.position.y = 24 * PX; body.add(head);
-    const h1 = part(mat, 0, 0, 8, 8, 8, 0); h1.position.y = 4 * PX; head.add(h1);
-    const h2 = part(mat, 32, 0, 8, 8, 8, 1); h2.position.y = 4 * PX; head.add(h2);
-    const torso = part(mat, 16, 16, 8, 12, 4, 0); torso.position.y = 18 * PX; body.add(torso);
-    const limb = (u, v, x, y) => { const g = new THREE.Group(); g.position.set(x * PX, y * PX, 0); const m = part(mat, u, v, 4, 12, 4, 0); m.position.y = -6 * PX; g.add(m); body.add(g); return g; };
-    const armR = limb(40, 16, -6, 24), armL = limb(32, 48, 6, 24), legR = limb(0, 16, -2, 12), legL = limb(16, 48, 2, 12);
+    const piece = (g, u, v, w, h, d, x, y, z, inf) => { const m = part(mat, u, v, w, h, d, inf || 0); m.position.set(x * PX, y * PX, z * PX); g.add(m); return m; };
+    const head = new THREE.Group(); head.position.y = 24 * PX; head.rotation.order = "YXZ"; body.add(head);
+    piece(head, 0, 0, 8, 8, 8, 0, 4, 0); piece(head, 32, 0, 8, 8, 8, 0, 4, 0, 1);
+    const torso = new THREE.Group(); torso.position.y = 24 * PX; body.add(torso);
+    piece(torso, 16, 16, 8, 12, 4, 0, -6, 0); piece(torso, 16, 32, 8, 12, 4, 0, -6, 0, 0.5);
+    const aw = p.slim ? 3 : 4, ax = p.slim ? 0.5 : 1;
+    const limb = (x, y) => { const g = new THREE.Group(); g.position.set(x * PX, y * PX, 0); body.add(g); return g; };
+    const armR = limb(-5, 22), armL = limb(5, 22), legR = limb(-1.9, 12), legL = limb(1.9, 12);
+    piece(armR, 40, 16, aw, 12, 4, -ax, -4, 0); piece(armR, 40, 32, aw, 12, 4, -ax, -4, 0, 0.5);
+    piece(armL, 32, 48, aw, 12, 4, ax, -4, 0); piece(armL, 48, 48, aw, 12, 4, ax, -4, 0, 0.5);
+    piece(legR, 0, 16, 4, 12, 4, 0, -6, 0); piece(legR, 0, 32, 4, 12, 4, 0, -6, 0, 0.5);
+    piece(legL, 16, 48, 4, 12, 4, 0, -6, 0); piece(legL, 0, 48, 4, 12, 4, 0, -6, 0, 0.5);
     if (p.name) root.add(nameTag(p.name, p.team));
-    // The player's cape (from their Mojang profile, when they have one), hanging from the shoulders.
+    // The cape the server gives the player (or their Mojang profile's), hanging from the shoulders.
     let cape = null;
-    if (p.skin && /^[A-Za-z0-9_]{1,16}$/.test(p.skin)) {
-      cape = new THREE.Group(); cape.position.set(0, 24 * PX, -2 * PX); body.add(cape);
+    const capeSrc = p.cape ? "/skinhash/" + p.cape.slice(1) : (p.skin && /^[A-Za-z0-9_]{1,16}$/.test(p.skin) ? "/cape/" + encodeURIComponent(p.skin) : null);
+    if (capeSrc) {
+      cape = new THREE.Group(); cape.position.set(0, 0, -2 * PX); torso.add(cape);
       const img = new Image();
       img.onload = () => {
         const W = Math.max(64, img.width), c = document.createElement("canvas"); c.width = W; c.height = W / 2; c.getContext("2d").drawImage(img, 0, 0);
@@ -1580,10 +1609,11 @@
         const cm = new THREE.MeshBasicMaterial({ map: nearestTex(c), transparent: true, alphaTest: 0.5 });
         const m = new THREE.Mesh(geo, cm); m.position.set(0, -8 * PX, -0.5 * PX); m.rotation.y = Math.PI; cape.add(m);
       };
-      img.src = "/cape/" + encodeURIComponent(p.skin);
+      img.src = capeSrc;
     }
     scene.add(root);
-    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat], cape, slots: { head: [head, 0, 4, 0], body: [body, 0, 18, 0], ra: [armR, 0, -6, 0], la: [armL, 0, -6, 0], rl: [legR, 0, -6, 0], ll: [legL, 0, -6, 0] } };
+    return { root, body, head, torso, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat], cape, player: true,
+      slots: { head: [head, 0, 4, 0], body: [torso, 0, -6, 0], ra: [armR, -1, -4, 0], la: [armL, 1, -4, 0], rl: [legR, 0, -6, 0], ll: [legL, 0, -6, 0] } };
   }
   const avatars = new Map();
   // ---------- items in hands and on the ground, the first-person hand, swings (as Minecraft draws them) ----------
@@ -1591,13 +1621,15 @@
   const nearestTex = c => { const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; return t; };
   /* A held or dropped item: flat items as a sprite plane, blocks as a small textured cube.
      kind: "fp" first person, "tp" in another player's hand, "drop" lying on the ground. */
-  function itemMesh(name, kind) {
-    const grp = new THREE.Group();
-    (async () => {
+  function itemMesh(spec, kind) {
+    const grp = new THREE.Group(), { name, x } = parseSpec(spec);
+    (async () => { await buildItem(); if (x.g) addGlint(grp); })();
+    return grp;
+    async function buildItem() {
       const alias = ITEM_ALIAS[name] || name, N = name.toUpperCase();
       let flat = null;
       if (BE_ITEM.test(name)) {
-        const model = beItemModel(name), box = new THREE.Group(), inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(model); box.add(inner);
+        const model = beItemModel(name, x), box = new THREE.Group(), inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(model); box.add(inner);
         if (kind === "fp") { box.rotation.set(0, Math.PI / 4, 0); box.scale.setScalar(0.4); }
         else if (kind === "tp") { box.position.set(0, -0.06, -0.12); box.rotation.set(75 * Math.PI / 180, Math.PI / 4, 0); box.scale.setScalar(0.3); }
         else box.scale.setScalar(0.25);
@@ -1605,9 +1637,7 @@
       }
       // A shield has no item picture in Minecraft: its face comes from the shield texture.
       if (name === "shield") {
-        const sh = userPack && userPack.get("entity/shield_base_nopattern") ? await loadImg("entity/shield_base_nopattern") : null;
-        const k = sh ? sh.width / 64 : 1, c = document.createElement("canvas"); c.width = 12; c.height = 22; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
-        if (sh) g.drawImage(sh, k, k, 12 * k, 22 * k, 0, 0, 12, 22); else { g.fillStyle = "#7a5a32"; g.fillRect(0, 0, 12, 22); }
+        const c = await shieldCanvas(x);
         const pl = new THREE.Mesh(new THREE.PlaneGeometry(12 / 16, 22 / 16), new THREE.MeshBasicMaterial({ map: nearestTex(c), side: THREE.DoubleSide }));
         if (kind === "fp") { pl.position.set(-0.1, 0.1, 0); pl.rotation.set(0, Math.PI / 2, 0); pl.scale.setScalar(0.6); }
         else if (kind === "tp") { pl.position.set(0, -0.05, -0.12); pl.rotation.set(-Math.PI / 2 + 0.2, 0, 0); pl.rotation.order = "YXZ"; pl.rotation.y = Math.PI / 2; pl.scale.setScalar(0.55); }
@@ -1628,6 +1658,7 @@
         grp.add(cube); return;
       } }
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: nearestTex(flat), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+      if (x.g) { const mk = document.createElement("canvas"); mk.width = mk.height = 16; const mg = mk.getContext("2d"), d = flat.getContext("2d").getImageData(0, 0, 16, 16), o = mg.createImageData(16, 16); for (let i = 0; i < 1024; i += 4) { const v = d.data[i + 3] > 128 ? 255 : 0; o.data[i] = o.data[i + 1] = o.data[i + 2] = v; o.data[i + 3] = 255; } mg.putImageData(o, 0, 0); plane.userData.mask = nearestTex(mk); }
       if (kind === "fp") {
         // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68.
         plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(-0.68, 0.68, 0.68);
@@ -1636,8 +1667,7 @@
         else { plane.position.set(0, -0.12, -0.18); plane.rotation.set(0, Math.PI / 2, 0); plane.scale.setScalar(0.45); }
       } else plane.scale.setScalar(0.35);
       grp.add(plane);
-    })();
-    return grp;
+    }
   }
   // The first-person hand lives in its own scene, drawn over the world, as in Minecraft.
   const handScene = new THREE.Scene();
@@ -1678,7 +1708,7 @@
       mT(0.56, -0.52 - drop * 0.6, -0.72);
       const f = Math.sin(sw * sw * Math.PI), f1 = Math.sin(Math.sqrt(sw) * Math.PI);
       mY(45 + f * -20); mZ(f1 * -20); mX(f1 * -80); mY(-45);
-      if (charge >= 0 && fpItemName === "bow") { const p = Math.min(1, (now - charge) / 1000); mT(-0.15 * p, 0.05 * p, 0.1 * p); mZ(-20 * p); }
+      if (charge >= 0 && /^bow(~|$)/.test(fpItemName || "")) { const p = Math.min(1, (now - charge) / 1000); mT(-0.15 * p, 0.05 * p, 0.1 * p); mZ(-20 * p); }
     } else {
       mT(-0.3 * Math.sin(Math.sqrt(sw) * Math.PI), 0.4 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.4 * Math.sin(sw * Math.PI));
       mT(0.64, -0.6 - drop * 0.6, -0.72); mY(45);
@@ -2155,22 +2185,22 @@
     else flipParts(o, [{ at: [0, 0, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8], ...(T[2] === 64 ? [[32, 0, -4, -8, -4, 8, 8, 8, 0.25]] : [])] }], T[1], T[2], [mat]);
   }
   /* Items that are these models in the hand and the inventory. */
-  const BE_ITEM = /^(chest|trapped_chest|ender_chest|([a-z_]+_)?shulker_box|[a-z_]+_bed|[a-z_]+_banner|skeleton_skull|wither_skeleton_skull|zombie_head|creeper_head|piglin_head|dragon_head|decorated_pot|conduit)$/;
-  function beItemModel(name) {
-    const N = name.toUpperCase();
+  const BE_ITEM = /^(chest|trapped_chest|ender_chest|([a-z_]+_)?shulker_box|[a-z_]+_bed|[a-z_]+_banner|skeleton_skull|wither_skeleton_skull|zombie_head|creeper_head|piglin_head|dragon_head|player_head|decorated_pot|conduit)$/;
+  function beItemModel(name, x) {
+    const N = name.toUpperCase(); x = x || {};
     if (/_BED$/.test(N)) {
       // A bed item shows both halves side by side.
       const g = new THREE.Group(); const h = blockEntityModel(N, { part: "head", facing: "south" }); h.position.z = 0.5; g.add(h);
       const f = blockEntityModel(N, { part: "foot", facing: "south" }); f.position.z = -0.5; g.add(f); return g;
     }
-    if (/_SKULL$|_HEAD$/.test(N)) { const g = new THREE.Group(); const o = new THREE.Group(); o.position.set(0.5, 0.25, 0.5); o.scale.setScalar(1.5); g.add(o); headModel(o, N); return g; }
-    return blockEntityModel(N, { facing: "south", type: "single", rotation: "0" });
+    if (/_SKULL$|_HEAD$/.test(N)) { const g = new THREE.Group(); const o = new THREE.Group(); o.position.set(0.5, 0.25, 0.5); o.scale.setScalar(1.5); g.add(o); headModel(o, N, { o: x.o, h: x.h }); return g; }
+    return blockEntityModel(N, { facing: "south", type: "single", rotation: "0" }, { pt: x.pt });
   }
   // Inventory icons of these models, drawn once with a small renderer of their own.
   let iconRenderer = null, iconScene = null, iconCam = null, iconQueue = Promise.resolve();
   // One at a time: each icon is drawn alone.
-  function modelIcon(name) { const job = iconQueue.then(() => drawModelIcon(name)); iconQueue = job.catch(() => null); return job; }
-  function drawModelIcon(name) {
+  function modelIcon(name, x) { const job = iconQueue.then(() => drawModelIcon(name, x)); iconQueue = job.catch(() => null); return job; }
+  function drawModelIcon(name, x) {
     try {
       if (!iconRenderer) {
         const c = document.createElement("canvas"); c.width = c.height = 64;
@@ -2178,7 +2208,7 @@
         iconScene = new THREE.Scene(); iconCam = new THREE.OrthographicCamera(-0.9, 0.9, 0.9, -0.9, 0.1, 10);
         iconCam.position.set(2, 1.6, 2); iconCam.lookAt(0, 0, 0);
       }
-      const m = beItemModel(name), holder = new THREE.Group(); const inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(m); holder.add(inner);
+      const m = beItemModel(name, x), holder = new THREE.Group(); const inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(m); holder.add(inner);
       if (/_bed$/.test(name)) holder.scale.setScalar(0.62);
       if (/banner$/.test(name)) { holder.scale.setScalar(0.62); holder.rotation.y = Math.PI / 4; holder.position.y = -0.55; }
       iconScene.add(holder);
@@ -2189,15 +2219,59 @@
       }, 350));
     } catch (e) { return Promise.resolve(null); }
   }
+
+  /* Items as the server describes them: "name" or "name~{extras}" (g: enchanted, pt: patterns, bc: shield base,
+     o/h: whose head, c: dye colour). */
+  function parseSpec(spec) {
+    spec = String(spec || ""); const i = spec.indexOf("~");
+    if (i < 0) return { name: spec, x: {} };
+    let x = {}; try { x = JSON.parse(spec.slice(i + 1)); } catch (e) { }
+    return { name: spec.slice(0, i), x };
+  }
+  const specOf = item => { if (!item || !item.m) return ""; const x = {}; if (item.glow) x.g = 1; if (item.pt) x.pt = item.pt; if (item.bc !== undefined) x.bc = item.bc; if (item.skin) x.o = item.skin; if (item.h) x.h = item.h; return Object.keys(x).length ? item.m + "~" + JSON.stringify(x) : item.m; };
+  // The enchantment glint: Minecraft's glint texture, purple, sliding over the item or armour.
+  let glintTex = null;
+  function glintMaterial(mask) {
+    if (!glintTex) {
+      const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d");
+      for (let i = -64; i < 128; i += 16) { g.fillStyle = "rgba(255,255,255,.35)"; g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 8, 0); g.lineTo(i + 72, 64); g.lineTo(i + 64, 64); g.fill(); }
+      glintTex = new THREE.CanvasTexture(c); glintTex.wrapS = glintTex.wrapT = THREE.RepeatWrapping; glintTex.repeat.set(0.5, 0.5);
+      if (userPack && userPack.get("misc/enchanted_glint_item")) loadImg("misc/enchanted_glint_item").then(img => { if (img) { glintTex.image = img; glintTex.needsUpdate = true; } });
+    }
+    const m = new THREE.MeshBasicMaterial({ map: glintTex, color: 0x6a3cc8, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, alphaMap: mask || null, alphaTest: mask ? 0.5 : 0, side: THREE.DoubleSide });
+    m.polygonOffset = true; m.polygonOffsetFactor = -1;
+    return m;
+  }
+  function addGlint(group) {
+    const meshes = []; group.traverse(o => { if (o.isMesh && !o.userData.glint) meshes.push(o); });
+    for (const o of meshes) { const gl = new THREE.Mesh(o.geometry, glintMaterial(o.userData.mask)); gl.userData.glint = true; gl.renderOrder = 4; o.add(gl); }
+  }
+  /* A shield's face: plain, or its banner's colour and patterns over it. */
+  async function shieldCanvas(x) {
+    const has = k => userPack && userPack.get(k);
+    const c = document.createElement("canvas"); c.width = 12; c.height = 22; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+    const layers = x && (x.bc !== undefined || x.pt) ? [{ key: "entity/shield_base" }, { key: "entity/shield/base", tint: DYE_RGB[x.bc ?? 0] }, ...((x.pt || []).filter(([code]) => BANNER_CODES[code]).map(([code, col]) => ({ key: "entity/shield/" + BANNER_CODES[code], tint: DYE_RGB[col] })))] : [{ key: "entity/shield_base_nopattern" }];
+    let drew = false;
+    for (const l of layers) {
+      const img = has(l.key) ? await loadImg(l.key) : null; if (!img) continue;
+      const k = img.width / 64, t = document.createElement("canvas"); t.width = 12; t.height = 22; const tg = t.getContext("2d"); tg.imageSmoothingEnabled = false;
+      tg.drawImage(img, k, k, 12 * k, 22 * k, 0, 0, 12, 22);
+      if (l.tint != null) { tg.globalCompositeOperation = "multiply"; tg.fillStyle = "#" + l.tint.toString(16).padStart(6, "0"); tg.fillRect(0, 0, 12, 22); tg.globalCompositeOperation = "destination-in"; tg.drawImage(img, k, k, 12 * k, 22 * k, 0, 0, 12, 22); }
+      g.drawImage(t, 0, 0); drew = true;
+    }
+    if (!drew) { g.fillStyle = "#7a5a32"; g.fillRect(0, 0, 12, 22); }
+    return c;
+  }
   /* Item icons as Minecraft draws them: flat items from the item textures, blocks as little 3D cubes. */
   const iconCache = new Map();
   const FLAT_BLOCK = n => PLANT(n) || /TORCH|RAIL|LADDER|_PANE$|IRON_BARS|_DOOR$|LEVER|TRIPWIRE|REDSTONE_WIRE|_SIGN$|_BANNER$|LANTERN$|CHAIN$|_CANDLE$|^CANDLE$|SCAFFOLDING|_BUTTON$|_CARPET$|_PRESSURE_PLATE$|^COBWEB$|POINTED_DRIPSTONE|AMETHYST_BUD|AMETHYST_CLUSTER|HOPPER$|CAULDRON$|BELL$|_HEAD$|_SKULL$/.test(n);
-  function iconArt(m) {
-    if (iconCache.has(m)) return iconCache.get(m);
+  function iconArt(m, x) {
+    x = x || {}; const ck = m + JSON.stringify(x);
+    if (iconCache.has(ck)) return iconCache.get(ck);
     const pr = (async () => {
       const name = ITEM_ALIAS[m] || m;
-      if (BE_ITEM.test(m)) return modelIcon(m);
-      if (m === "shield") { const sh = userPack && userPack.get("entity/shield_base_nopattern") ? await loadImg("entity/shield_base_nopattern") : null; if (sh) { const k = sh.width / 64, c2 = document.createElement("canvas"); c2.width = c2.height = 24; const g2 = c2.getContext("2d"); g2.imageSmoothingEnabled = false; g2.drawImage(sh, k, k, 12 * k, 22 * k, 6, 1, 12, 22); return c2; } }
+      if (BE_ITEM.test(m)) return modelIcon(m, x);
+      if (m === "shield") { const sh = await shieldCanvas(x), c2 = document.createElement("canvas"); c2.width = c2.height = 24; const g2 = c2.getContext("2d"); g2.imageSmoothingEnabled = false; g2.drawImage(sh, 6, 1); return c2; }
       const c = document.createElement("canvas"); const g = c.getContext("2d");
       const flat = await loadImg("item/" + name);
       if (flat) { c.width = c.height = 16; g.imageSmoothingEnabled = false; g.drawImage(flat, 0, 0, flat.width, flat.width, 0, 0, 16, 16); return c; }
@@ -2219,20 +2293,30 @@
       g.setTransform(1, 0, 0, 1, 0, 0);
       return c;
     })();
-    iconCache.set(m, pr); return pr;
+    iconCache.set(ck, pr); return pr;
   }
+  // Enchanted items in the inventory: the purple glint slides over the icon, inside its outline.
+  const glintIcons = new Set();
+  setInterval(() => {
+    if (!glintIcons.size) return;
+    const t = performance.now() / 40;
+    for (const c of glintIcons) {
+      if (!c.isConnected) { glintIcons.delete(c); continue; }
+      const g = c.getContext("2d"); g.globalCompositeOperation = "source-over"; g.clearRect(0, 0, 64, 64); g.imageSmoothingEnabled = false;
+      g.drawImage(c.__art, 0, 0, c.__art.width, c.__art.height, 0, 0, 64, 64);
+      g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(160,90,255,.45)";
+      for (let i = -128; i < 128; i += 48) { const o = (i + t) % 192 - 64; g.beginPath(); g.moveTo(o, 0); g.lineTo(o + 14, 0); g.lineTo(o + 78, 64); g.lineTo(o + 64, 64); g.fill(); }
+      g.globalCompositeOperation = "source-over";
+    }
+  }, 60);
   function iconFor(item, px) {
     const size = px || 30;
     const c = document.createElement("canvas"); c.className = "icon" + (item.glow ? " glow" : "");
     c.width = c.height = 64; c.style.width = c.style.height = size + "px";
     const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
-    if (item.m === "player_head") {
-      g.fillStyle = "#c58c69"; g.fillRect(8, 8, 48, 48);
-      if (item.skin) { const s = new Image(); s.onload = () => { g.drawImage(s, 8, 8, 8, 8, 8, 8, 48, 48); g.drawImage(s, 40, 8, 8, 8, 6, 6, 52, 52); }; s.src = "/skin/" + encodeURIComponent(item.skin); }
-      return c;
-    }
-    iconArt(item.m).then(art => {
-      if (art) g.drawImage(art, 0, 0, art.width, art.height, 0, 0, 64, 64);
+    const x = {}; if (item.pt) x.pt = item.pt; if (item.bc !== undefined) x.bc = item.bc; if (item.skin) x.o = item.skin; if (item.h) x.h = item.h;
+    iconArt(item.m, x).then(art => {
+      if (art) { g.drawImage(art, 0, 0, art.width, art.height, 0, 0, 64, 64); if (item.glow) { c.__art = art; glintIcons.add(c); } }
       else { g.fillStyle = "#d040d0"; g.fillRect(8, 8, 24, 24); g.fillRect(32, 32, 24, 24); g.fillStyle = "#000"; g.fillRect(32, 8, 24, 24); g.fillRect(8, 32, 24, 24); }
     });
     return c;
@@ -2412,7 +2496,7 @@
   /* The hotbar as in Minecraft: nine slots in a grey strip, the chosen one framed. */
   function hotbar(o) {
     lastHotbar = o;
-    const inHand = o.items[o.held]; fpSetItem(inHand && inHand.m ? inHand.m : null);
+    const inHand = o.items[o.held]; fpSetItem(inHand && inHand.m ? specOf(inHand) : null);
     const bar = $("hotbar"); bar.innerHTML = ""; held = o.held;
     const S = Math.max(1.5, Math.min(2.5, innerWidth * 0.48 / 182));
     if (S !== hbS) { hbS = S; statusDraw(); }
@@ -2619,7 +2703,7 @@
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
     const prev = new Map(a.d.p.map(q => [q[0], q]));
-    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", md: q[14] || 0, ar: q[15] || 0, off: q[16] || "", keeper: String(q[0]).startsWith("a") }; });
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", md: q[14] || 0, ar: q[15] || 0, off: q[16] || "", slim: q[17] === 1, cape: q[18] || "", keeper: String(q[0]).startsWith("a") }; });
     const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
     return { people, ball, latest: b.d };
   }
@@ -2662,19 +2746,34 @@
       for (const p of st.people) {
         seen.add(p.id);
         let a = avatars.get(p.id);
-        if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name || (a.look && a.look !== lookKey(p))) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
+        if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name || (a.player && (a.slim !== p.slim || a.capeKey !== p.cape)) || (a.look && a.look !== lookKey(p))) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; a.slim = p.slim; a.capeKey = p.cape; avatars.set(p.id, a); }
         const isMe = p.id === myId;
         const px = isMe ? me.rx : p.x, py = isMe ? me.ry : p.y, pz = isMe ? me.rz : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
         // Minecraft's walk animation: speed = blocks per tick × 4 (at most 1), eased by 0.4 a tick; the limbs
         // swing as cos(position × 0.6662) × 1.4 × speed, the arms against the legs.
-        let moved = Math.hypot(px - a.x, pz - a.z); a.x = px; a.z = pz;
+        const mdx = px - a.x, mdz = pz - a.z;
+        let moved = Math.hypot(mdx, mdz); a.x = px; a.z = pz;
         if (moved > 4) moved = 0;
         const ticks = Math.max(0.001, dt / 0.05);
         a.walkSpeed = (a.walkSpeed || 0) + (Math.min(1, moved / ticks * 4) - (a.walkSpeed || 0)) * (1 - Math.pow(0.6, ticks));
         a.walkPos = (a.walkPos || 0) + a.walkSpeed * ticks;
         const walk = Math.cos(a.walkPos * 0.6662) * a.walkSpeed, swing = walk * 1.4;
         a.root.position.set(px, py, pz);
-        a.root.rotation.y = -yawDeg * Math.PI / 180;
+        // The body turns toward where it walks, the head looks on its own, at most 75° (standing: 50°) away,
+        // as Minecraft works it out for every living thing; walking backwards the body keeps facing forward.
+        const wrapDeg = d => ((d % 360) + 540) % 360 - 180;
+        if (a.item || a.thing || !a.head) a.bodyYaw = yawDeg;
+        else {
+          if (a.bodyYaw === undefined) a.bodyYaw = yawDeg;
+          const moving = moved / ticks > 0.02;
+          let target = a.bodyYaw;
+          if (moving) { let mv = Math.atan2(-mdx, mdz) * 180 / Math.PI; if (Math.abs(wrapDeg(mv - yawDeg)) > 95) mv += 180; target = mv; }
+          a.bodyYaw += wrapDeg(target - a.bodyYaw) * (1 - Math.pow(0.7, ticks));
+          const lim = moving ? 75 : 50, diff = wrapDeg(yawDeg - a.bodyYaw);
+          if (Math.abs(diff) > lim) a.bodyYaw += diff - Math.sign(diff) * lim;
+          a.head.rotation.y = -wrapDeg(yawDeg - a.bodyYaw) * Math.PI / 180;
+        }
+        a.root.rotation.y = -a.bodyYaw * Math.PI / 180;
         if (a.item) { a.body.rotation.y += dt * 2; a.body.position.y = 0.2 + Math.sin(now / 320) * 0.06; continue; }
         if (a.mats) {
           // Darker at night like the world around them, red for a moment when hit.
@@ -2688,16 +2787,24 @@
         if (leftHand && a.offName !== p.off) { if (a.offMesh) leftHand.remove(a.offMesh); a.offName = p.off; a.offMesh = p.off ? itemMesh(p.off, "tp") : null; if (a.offMesh) { a.offMesh.position.set(a.armL ? 0 : PX, (a.armL ? -10 : -9) * PX, 0); leftHand.add(a.offMesh); } }
         if (a.cape) a.cape.rotation.x = 0.1 + (a.walkSpeed || 0) * 0.9 + (sneak ? 0.3 : 0);
         if (a.mob && a.handPart && a.held !== p.held) { if (a.heldMesh) a.handPart.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.set(-1 * PX, -9 * PX, 0); a.handPart.add(a.heldMesh); } }
-        a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
+        a.head.rotation.x = (a.headBase || 0) + pitch * Math.PI / 180;
         if (a.tilt) a.tilt.rotation.x = pitch * Math.PI / 180;
         if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
-        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
+        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -walk; a.armL.rotation.x = walk;
         // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
         if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.y = -10 * PX; a.armR.add(a.heldMesh); } }
         if (p.held) a.armR.rotation.x = a.armR.rotation.x * 0.5 - Math.PI / 10;
         if (a.swingAt) { const t = (now - a.swingAt) / 300; if (t < 1) { a.armR.rotation.x -= Math.sin(t * Math.PI) * 1.3 + Math.sin(Math.sqrt(t) * Math.PI) * 0.4; a.armR.rotation.y = Math.sin(Math.sqrt(t) * Math.PI) * 0.3; } else a.armR.rotation.y = 0; }
-        a.body.rotation.x = sneak ? 0.45 : 0; a.body.position.y = sneak ? -0.2 : 0;
+        // Crouching as Minecraft poses it: only the torso leans, the head and arms drop, the legs step back,
+        // the arms come forward, and the whole player sits 2 pixels lower.
+        const c = sneak ? 1 : 0;
+        a.torso.rotation.x = 0.5 * c; a.torso.position.y = (24 - 3.2 * c) * PX;
+        a.head.position.y = (24 - 4.2 * c) * PX;
+        a.armR.position.y = a.armL.position.y = (22 - 3.2 * c) * PX;
+        a.armR.rotation.x += 0.4 * c; a.armL.rotation.x += 0.4 * c;
+        a.legR.position.z = a.legL.position.z = -4 * c * PX; a.legR.position.y = a.legL.position.y = (12 - 0.2 * c) * PX;
+        a.body.position.y = -0.125 * c;
         a.root.visible = !(isMe && !thirdPerson && !cam);
       }
       for (const [id, a] of avatars) if (!seen.has(id)) { scene.remove(a.root); avatars.delete(id); }
@@ -2732,6 +2839,7 @@
     if (charge >= 0) { const p = Math.min(1, (performance.now() - charge) / 1200); xp.firstChild.style.width = (p * 100) + "%"; xp.classList.toggle("power", p >= 1); }
     else { xp.firstChild.style.width = "0"; xp.classList.remove("power"); }
     stepAnims(); updateSky(now);
+    if (glintTex) { glintTex.offset.set((now / 3000) % 1, (now / 4500) % 1); }
     for (const b of beBobs) { b.position.y = 0.95 + Math.sin(now / 500) * 0.05; b.rotation.y = now / 2000; } if (me.ready) footsteps();
     renderer.render(skyScene, skyCam);
     renderer.autoClear = false; renderer.clearDepth(); renderer.render(scene, camera); renderer.autoClear = true;
@@ -2756,7 +2864,7 @@
   setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);
   const act = a => {
     send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12);
-    if (a === "ldown" || (a === "rdown" && fpItemName !== "bow")) { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
+    if (a === "ldown" || (a === "rdown" && !/^bow(~|$)/.test(fpItemName || ""))) { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
   };
   const rightDown = () => { charge = performance.now(); act("rdown"); };
   const rightUp = () => { charge = -1; act("rup"); };

@@ -64,7 +64,7 @@ async function capePng(name) { const k = name.toLowerCase(); if (!skins.has(k)) 
 /* pack.zip may be a whole Minecraft client .jar (23 MB): players get only what the game draws (block, item and
    GUI textures), copied entry by entry, still compressed, into pack-web.zip. */
 function slimPack() {
-  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web4.zip");
+  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web5.zip");
   let st; try { st = fs.statSync(src); } catch (e) { return null; }
   try { if (fs.statSync(out).mtimeMs >= st.mtimeMs) return out; } catch (e) { }
   try {
@@ -83,7 +83,7 @@ function slimPack() {
       const lo = b.readUInt32LE(p + 42), csize = b.readUInt32LE(p + 20);
       const central = b.subarray(p, p + 46 + nameLen + extraLen + commentLen);
       p += 46 + nameLen + extraLen + commentLen;
-      if (!/^assets\/minecraft\/(textures\/(block|item|gui|font|environment|entity|models\/armor|painting)\/[a-z0-9_\/]+\.png(\.mcmeta)?|font\/[a-z0-9_\/]+\.json)$/.test(name)) continue;
+      if (!/^assets\/minecraft\/(textures\/(block|item|gui|font|environment|entity|models\/armor|painting|misc)\/[a-z0-9_\/]+\.png(\.mcmeta)?|font\/[a-z0-9_\/]+\.json)$/.test(name)) continue;
       const lNameLen = b.readUInt16LE(lo + 26), lExtraLen = b.readUInt16LE(lo + 28);
       const local = Buffer.from(b.subarray(lo, lo + 30 + lNameLen + lExtraLen + csize));
       local.writeUInt16LE(local.readUInt16LE(6) & ~8, 6); // sizes are in the header; no data descriptor follows
@@ -91,7 +91,7 @@ function slimPack() {
       locals.push(local); centrals.push(c); offset += local.length;
     }
     if (!locals.length) throw new Error("pakette doku yok");
-    for (const old of ["pack-web.zip", "pack-web2.zip", "pack-web3.zip"]) try { fs.unlinkSync(path.join(__dirname, old)); } catch (e) { }
+    for (const old of ["pack-web.zip", "pack-web2.zip", "pack-web3.zip", "pack-web4.zip"]) try { fs.unlinkSync(path.join(__dirname, old)); } catch (e) { }
     const cd = Buffer.concat(centrals), end = Buffer.alloc(22);
     end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(locals.length, 8); end.writeUInt16LE(locals.length, 10);
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
@@ -432,19 +432,23 @@ class Session {
         const info = Object.values(bot.players).find(p => p.uuid === e.uuid);
         const name = isMe ? this.name : (e.username || (info && info.username) || "");
         if (info && info.gamemode === 3 && !isMe) continue;
-        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, name.startsWith("(mobil)") ? "" : name, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem), 0, armourOf(e), offhandOf(isMe ? { equipment: [0, bot.inventory.slots[45]] } : e)]);
+        // The skin the server gives this player (as a Minecraft client gets it), else their name for Mojang.
+        const sd = (info && info.skinData) || (isMe && bot.player && bot.player.skinData) || null;
+        const skinKey = sd && sd.url ? "#" + sd.url.split("/").pop() : (name.startsWith("(mobil)") ? "" : name);
+        const capeKey = sd && sd.capeUrl ? "#" + sd.capeUrl.split("/").pop() : "";
+        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, skinKey, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem), 0, armourOf(isMe ? { equipment: [0, 0, bot.inventory.slots[8], bot.inventory.slots[7], bot.inventory.slots[6], bot.inventory.slots[5]] } : e), offhandOf(isMe ? { equipment: [0, bot.inventory.slots[45]] } : e), sd && sd.model === "slim" ? 1 : 0, capeKey]);
       } else if (e.name === "armor_stand") {
         if (invisible(e)) continue;
         people.push(["a" + e.id.toString(16), customName(e), -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), 0, 0, "", "a"]);
       } else if (e.name === "item") {
         const item = e.getDroppedItem && e.getDroppedItem();
-        people.push(["i" + e.id.toString(16), item ? item.name : "stone", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), 0, 0, 0, "", "i"]);
+        people.push(["i" + e.id.toString(16), item ? itemSpec(item) : "stone", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), 0, 0, 0, "", "i"]);
       } else if (["mob", "hostile", "animal", "passive", "water_creature", "ambient", "projectile", "orb"].includes(e.type) || (e.type === "other" && e.height > 0.2 && !/display|marker|interaction|area_effect/.test(e.name || ""))) {
         if (invisible(e)) continue;
         const sd = this.spawnData.get(e.id), framed = /item_frame/.test(e.name);
         let looks = looksOf(bot, e);
         if (e.name === "falling_block" && sd != null) { const b = bot.registry.blocksByStateId[sd]; if (b) looks = Object.assign(looks || {}, { block: b.name }); }
-        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), (e.name === "painting" || framed) && this.faces.has(e.id) ? this.faces.get(e.id) : Math.round(fromYaw(e.yaw)), framed && (sd === 0 || sd === 1) ? (sd === 1 ? -90 : 90) : Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8), heldName(e.heldItem), looks, armourOf(e), offhandOf(e)]);
+        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), (e.name === "painting" || framed) && this.faces.has(e.id) ? this.faces.get(e.id) : Math.round(fromYaw(e.headYaw ?? e.yaw)), framed && (sd === 0 || sd === 1) ? (sd === 1 ? -90 : 90) : Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8), heldName(e.heldItem), looks, armourOf(e), offhandOf(e)]);
       }
     }
     const x = this.extras;
@@ -573,8 +577,31 @@ class Session {
 
 const BE_BLOCK = /chest$|shulker_box$|_bed$|banner$|sign$|_skull$|_head$|^bell$|decorated_pot|^conduit$|^beacon$|^enchanting_table$|^lectern$/;
 const BE_DATA = /sign$|banner$|_skull$|_head$/;
-function heldName(item) { return item && item.name ? item.name : ""; }
-function offhandOf(e) { const it = (e.equipment || [])[1]; return it && it.name ? it.name : ""; }
+const nbtLib = require("prismarine-nbt");
+/* What else shows on an item: enchantment glint, banner/shield patterns, whose head, dye colour. */
+function itemExtras(item) {
+  const x = {};
+  try { if ((item.enchants && item.enchants.length) || item.name === "enchanted_book" || item.name === "enchanted_golden_apple") x.g = 1; } catch (e) { }
+  let n = null; try { n = item.nbt ? nbtLib.simplify(item.nbt) : null; } catch (e) { }
+  if (n) {
+    const bet = n.BlockEntityTag;
+    if (bet && bet.Patterns) x.pt = bet.Patterns.map(q => [q.Pattern, q.Color]);
+    if (bet && bet.Base !== undefined) x.bc = bet.Base;
+    const so = n.SkullOwner;
+    if (so) { if (typeof so === "string") x.o = so; else { if (so.Name) x.o = so.Name; try { const v = so.Properties.textures[0].Value; x.h = JSON.parse(Buffer.from(v, "base64").toString()).textures.SKIN.url.split("/").pop(); } catch (e) { } } }
+    if (n.display && n.display.color !== undefined) x.c = n.display.color;
+    if (n.Enchantments && n.Enchantments.length) x.g = 1;
+  }
+  return x;
+}
+/* An item for the models: its name, then its extras as JSON after "~" when it has any. */
+function itemSpec(item) {
+  if (!item || !item.name) return "";
+  const x = itemExtras(item);
+  return Object.keys(x).length ? item.name + "~" + JSON.stringify(x) : item.name;
+}
+function heldName(item) { return itemSpec(item); }
+function offhandOf(e) { return itemSpec((e.equipment || [])[1]); }
 /* What a mob looks like beyond its kind (wool colour, horse coat, villager job, baby…), by metadata name. */
 const LOOKS = ["baby", "wool", "flags", "type_variant", "variant", "collar_color", "type", "main_gene", "hidden_gene", "color", "villager_data", "saddle", "swag", "chest", "pumpkin", "is_powered", "suffocating", "remaining_anger_time", "health", "special_type", "owneruuid", "painting_variant", "item", "rotation"];
 function looksOf(bot, e) {
@@ -597,9 +624,7 @@ function armourOf(e) {
   const eq = e.equipment || []; let any = false;
   const out = [5, 4, 3, 2].map(i => {
     const it = eq[i]; if (!it || !it.name) return "";
-    any = true;
-    let c = null; try { c = it.nbt && it.nbt.value.display && it.nbt.value.display.value.color && it.nbt.value.display.value.color.value; } catch (x) { }
-    return c != null ? it.name + "#" + c : it.name;
+    any = true; return itemSpec(it);
   });
   return any ? out : 0;
 }
@@ -628,6 +653,7 @@ function itemJson(item) {
   const nbt = item.nbt && item.nbt.value;
   const owner = nbt && nbt.SkullOwner;
   if (owner) o.skin = owner.type === "string" ? owner.value : (owner.value.Name && owner.value.Name.value) || "";
+  try { const x = itemExtras(item); if (x.pt) o.pt = x.pt; if (x.bc !== undefined) o.bc = x.bc; if (x.h) o.h = x.h; if (x.c !== undefined) o.c = x.c; if (x.g) o.glow = true; } catch (e) { }
   return o;
 }
 
