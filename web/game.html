@@ -2136,9 +2136,14 @@
         if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
         const isMe = p.id === myId;
         const px = isMe ? me.rx : p.x, py = isMe ? me.ry : p.y, pz = isMe ? me.rz : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
-        const moved = Math.hypot(px - a.x, pz - a.z); a.x = px; a.z = pz;
-        a.phase += Math.min(0.6, moved * 2.2);
-        const swing = Math.sin(a.phase) * Math.min(1, moved * 12) * 0.9;
+        // Minecraft's walk animation: speed = blocks per tick × 4 (at most 1), eased by 0.4 a tick; the limbs
+        // swing as cos(position × 0.6662) × 1.4 × speed, the arms against the legs.
+        let moved = Math.hypot(px - a.x, pz - a.z); a.x = px; a.z = pz;
+        if (moved > 4) moved = 0;
+        const ticks = Math.max(0.001, dt / 0.05);
+        a.walkSpeed = (a.walkSpeed || 0) + (Math.min(1, moved / ticks * 4) - (a.walkSpeed || 0)) * (1 - Math.pow(0.6, ticks));
+        a.walkPos = (a.walkPos || 0) + a.walkSpeed * ticks;
+        const walk = Math.cos(a.walkPos * 0.6662) * a.walkSpeed, swing = walk * 1.4;
         a.root.position.set(px, py, pz);
         a.root.rotation.y = -yawDeg * Math.PI / 180;
         if (a.item) { a.body.rotation.y += dt * 2; a.body.position.y = 0.2 + Math.sin(now / 320) * 0.06; continue; }
@@ -2150,8 +2155,8 @@
         if (isMe) fpSetSkin(p.skin, p.team);
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
         if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
-        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing * 1.4 : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
-        a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
+        if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
+        a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -walk; a.armL.rotation.x = walk;
         // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
         if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.y = -10 * PX; a.armR.add(a.heldMesh); } }
         if (p.held) a.armR.rotation.x = a.armR.rotation.x * 0.5 - Math.PI / 10;
