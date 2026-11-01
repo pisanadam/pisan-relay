@@ -345,7 +345,7 @@
       const map = new Map();
       const jobs = [];
       zip.forEach((path, entry) => {
-        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment|entity)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
+        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment|entity|models\/armor|painting)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
         if (m && (m[1] !== "block" || !m[2].includes("/"))) {
           // Block textures by bare name (as the world asks for them), everything else by folder/name.
           const meta = !!m[3], key = (m[1] === "block" && !meta ? m[2] : m[1] + "/" + m[2]) + (meta ? ".mcmeta" : "");
@@ -940,6 +940,7 @@
     legs: crossed ? [["rl", 1], ["ll", -1]] : [["rl", 1], ["ll", -1], ["ra", -1], ["la", 1]] });
   const horse = tex => ({ tex, tw: 64, th: 64, h: 1.6, parts: [
     { n: "body", at: [0, 11, 5], b: [[0, 32, -5, -8, -17, 10, 10, 22, 0.05]] },
+    { n: "saddle", parent: "body", opt: "saddle", at: [0, 0, 0], b: [[26, 0, -5, -8, -9, 10, 9, 9, 0.5]] },
     { n: "head", at: [0, 4, -12], rot: [0.5236, 0, 0], b: [[0, 35, -2.05, -6, -2, 4, 12, 7], [0, 13, -3, -11, -2, 6, 5, 7], [56, 36, -1, -11, 5.01, 2, 16, 2], [0, 25, -2, -11, -7, 4, 5, 5], [19, 16, 0.55, -13, 4, 2, 3, 1], [19, 16, -2.55, -13, 4, 2, 3, 1, 0, 1]] },
     { n: "tail", at: [0, 4, 11], rot: [0.5236, 0, 0], b: [[42, 36, -1.5, 0, 0, 3, 14, 4]] },
     { n: "rh", at: [-4, 14, 7], b: [[48, 21, -1, -1.01, -1, 4, 11, 4]] }, { n: "lh", at: [4, 14, 7], b: [[48, 21, -3, -1.01, -1, 4, 11, 4, 0, 1]] },
@@ -1101,7 +1102,17 @@
       { n: "tail", parent: "back", at: [0, 0, 8], b: [[20, 10, 0, -2.5, 0, 0, 5, 6]] }], 0.4),
     tropical_fish: fish("entity/fish/tropical_a", 32, 32, [
       { n: "body", at: [0, 22, 0], b: [[0, 0, -1, -1.5, -3, 2, 3, 6]] },
-      { n: "tail", at: [0, 22, 3], b: [[22, -6, 0, -1.5, 0, 0, 3, 6]] }], 0.4),
+      { n: "tail", at: [0, 22, 3], b: [[22, -6, 0, -1.5, 0, 0, 3, 6]] },
+      { n: "rfin", at: [-1, 22.5, 0], rot: [0, 0.7854, 0], b: [[2, 16, -2, -1, 0, 2, 2, 0]] },
+      { n: "lfin", at: [1, 22.5, 0], rot: [0, -0.7854, 0], b: [[2, 12, 0, -1, 0, 2, 2, 0]] },
+      { n: "top", at: [0, 20.5, -3], b: [[10, -5, 0, -3, 0, 0, 3, 6]] }], 0.4),
+    tropical_fish_b: fish("entity/fish/tropical_b", 32, 32, [
+      { n: "body", at: [0, 19, 0], b: [[0, 20, -1, -3, -3, 2, 6, 6]] },
+      { n: "tail", at: [0, 19, 3], b: [[21, 16, 0, -3, 0, 0, 6, 5]] },
+      { n: "rfin", at: [-1, 20, 0], rot: [0, 0.7854, 0], b: [[2, 16, -2, 0, 0, 2, 2, 0]] },
+      { n: "lfin", at: [1, 20, 0], rot: [0, -0.7854, 0], b: [[2, 12, 0, 0, 0, 2, 2, 0]] },
+      { n: "top", at: [0, 16, 0], b: [[20, 11, 0, -4, -3, 0, 4, 6]] },
+      { n: "bottom", at: [0, 22, 0], b: [[20, 21, 0, 0, -3, 0, 4, 6]] }], 0.4),
     pufferfish: fish("entity/fish/pufferfish", 32, 32, [
       { n: "body", at: [0, 22, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8]] },
       { n: "tail", at: [0, 22, 0], b: [] }], 0.7),
@@ -1228,22 +1239,156 @@
       ...Q4(112, 104, [-4, -4, -4, 8, 24, 8], [[-16, 16, 42], [16, 16, 42], [-12, 20, 2], [12, 20, 2]], [[0, 0], [0, 0], [112, 104], [112, 104]])],
       legs: QUAD_LEGS, flap: [["lw", "z", 0.5, 0.35], ["rw", "z", -0.5, 0.35]] },
   });
+
+  // ---------- what the server says each mob looks like: colours, coats, jobs, babies, saddles, armour ----------
+  const DYES = ["white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray", "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"];
+  const DYE_RGB = [0xF9FFFE, 0xF9801D, 0xC74EBD, 0x3AB3DA, 0xFED83D, 0x80C71F, 0xF38BAA, 0x474F52, 0x9D9D97, 0x169C9C, 0x8932B8, 0x3C44AA, 0x835432, 0x5E7C16, 0xB02E26, 0x1D1D21];
+  const VILLAGER_TYPES = ["desert", "jungle", "plains", "savanna", "snow", "swamp", "taiga"];
+  const PROFESSIONS = ["none", "armorer", "butcher", "cartographer", "cleric", "farmer", "fisherman", "fletcher", "leatherworker", "librarian", "mason", "nitwit", "shepherd", "toolsmith", "weaponsmith"];
+  const LEVELS = ["stone", "stone", "iron", "gold", "emerald", "diamond"];
+  const sheepRgb = c => c === 0 ? 0xE6E6E6 : (((DYE_RGB[c] >> 16 & 255) * 0.75) << 16) | (((DYE_RGB[c] >> 8 & 255) * 0.75) << 8) | ((DYE_RGB[c] & 255) * 0.75);
+  /* The texture layers for one mob as the server describes it: [{key, tint}], plus fur colour and similar. */
+  function looksOf(p, def) {
+    const md = p.md || {}, n = p.name, L = { layers: [{ key: def.tex }], fur: null, noFur: false };
+    const base = k => { L.layers[0] = { key: k }; }, add = (k, tint) => L.layers.push({ key: k, tint });
+    switch (n) {
+      case "sheep": {
+        const w = md.wool || 0; L.noFur = !!(w & 16);
+        L.fur = p.skin === "jeb_" ? sheepRgb(Math.floor(performance.now() / 1000) % 16) : sheepRgb(w & 15); break;
+      }
+      case "horse": {
+        const v = md.type_variant || 0, coats = ["white", "creamy", "chestnut", "brown", "black", "gray", "darkbrown"], marks = [null, "white", "whitefield", "whitedots", "blackdots"];
+        base("entity/horse/horse_" + (coats[v & 255] || "brown"));
+        if (marks[(v >> 8) & 255]) add("entity/horse/horse_markings_" + marks[(v >> 8) & 255]);
+        break;
+      }
+      case "llama": case "trader_llama": {
+        base("entity/llama/" + (["creamy", "white", "brown", "gray"][md.variant || 0] || "creamy"));
+        if (n === "trader_llama") add("entity/llama/decor/trader_llama");
+        else if (md.swag >= 0 && md.swag !== undefined) add("entity/llama/decor/" + DYES[md.swag]);
+        break;
+      }
+      case "cat": {
+        base("entity/cat/" + (["tabby", "black", "red", "siamese", "british_shorthair", "calico", "persian", "ragdoll", "white", "jellie", "all_black"][md.variant || 0] || "tabby"));
+        if (md.tame) add("entity/cat/cat_collar", DYE_RGB[md.collar_color ?? 14]);
+        break;
+      }
+      case "wolf": {
+        base(md.remaining_anger_time > 0 ? "entity/wolf/wolf_angry" : md.tame ? "entity/wolf/wolf_tame" : "entity/wolf/wolf");
+        if (md.tame) add("entity/wolf/wolf_collar", DYE_RGB[md.collar_color ?? 14]);
+        break;
+      }
+      case "rabbit": base("entity/rabbit/" + (p.skin === "Toast" ? "toast" : { 0: "brown", 1: "white", 2: "black", 3: "white_splotched", 4: "gold", 5: "salt", 99: "caerbannog" }[md.type || 0] || "brown")); break;
+      case "parrot": base("entity/parrot/parrot_" + (["red_blue", "blue", "green", "yellow_blue", "grey"][md.variant || 0] || "red_blue")); break;
+      case "axolotl": base("entity/axolotl/axolotl_" + (["lucy", "wild", "gold", "cyan", "blue"][md.variant || 0] || "lucy")); break;
+      case "fox": base(md.type === 1 ? "entity/fox/snow_fox" : "entity/fox/fox"); break;
+      case "frog": base("entity/frog/" + (["temperate", "warm", "cold"][md.variant || 0] || "temperate") + "_frog"); break;
+      case "mooshroom": base("entity/cow/" + (md.type === "brown" ? "brown" : "red") + "_mooshroom"); break;
+      case "panda": {
+        const genes = ["", "lazy_", "worried_", "playful_", "brown_", "weak_", "aggressive_"], m = md.main_gene || 0, h = md.hidden_gene || 0;
+        const g = (m === 4 || m === 5) && m !== h ? 0 : m; base("entity/panda/" + genes[g] + "panda"); break;
+      }
+      case "shulker": if (md.color !== undefined && md.color < 16) base("entity/shulker/shulker_" + DYES[md.color]); break;
+      case "villager": case "zombie_villager": {
+        const dir = n === "villager" ? "villager" : "zombie_villager", vd = md.villager_data || [2, 0, 1];
+        add("entity/" + dir + "/type/" + (VILLAGER_TYPES[vd[0]] || "plains"));
+        const prof = PROFESSIONS[vd[1]] || "none";
+        if (prof !== "none") { add("entity/" + dir + "/profession/" + prof); if (prof !== "nitwit") add("entity/" + dir + "/profession_level/" + LEVELS[Math.max(1, Math.min(5, vd[2] || 1))]); }
+        break;
+      }
+      case "pig": if (md.saddle) add("entity/pig/pig_saddle"); break;
+      case "strider": if (md.suffocating) base("entity/strider/strider_cold"); if (md.saddle) add("entity/strider/strider_saddle"); break;
+      case "bee": { const nectar = md.flags & 8, angry = md.remaining_anger_time > 0; base("entity/bee/bee" + (angry ? "_angry" : "") + (nectar ? "_nectar" : "")); break; }
+      case "iron_golem": { const hp = md.health ?? 100; if (hp < 75) add("entity/iron_golem/iron_golem_crackiness_" + (hp < 25 ? "high" : hp < 50 ? "medium" : "low")); break; }
+      case "tropical_fish": {
+        const v = md.type_variant || 0, big = (v & 255) === 1, pat = ((v >> 8) & 255) + 1;
+        base("entity/fish/tropical_" + (big ? "b" : "a")); L.layers[0].tint = DYE_RGB[(v >> 16) & 255];
+        add("entity/fish/tropical_" + (big ? "b" : "a") + "_pattern_" + Math.min(6, pat), DYE_RGB[(v >> 24) & 255]);
+        break;
+      }
+      case "creeper": if (md.is_powered) L.charged = true; break;
+    }
+    if (n === "horse" || n === "donkey" || n === "mule" || n === "skeleton_horse" || n === "zombie_horse" || n === "camel") { if (md.flags & 4) L.saddle = true; }
+    return L;
+  }
+  /* A mob's look as one key, so it is rebuilt only when that changes. */
+  function lookKey(p) {
+    const md = p.md || {}, k = { ...md }; delete k.health; delete k.remaining_anger_time; delete k.flags;
+    if (p.name === "iron_golem") k.c = Math.floor((md.health ?? 100) / 25);
+    if (p.name === "bee") k.b = (md.flags & 8) + (md.remaining_anger_time > 0 ? 1 : 0);
+    if (/horse|donkey|mule|camel/.test(p.name)) k.s = md.flags & 4;
+    return p.name + JSON.stringify(k);
+  }
+  /* Layers drawn into one texture, each tinted when it should be (dyed collars, fish colours). */
+  function layeredMat(layers, colour, translucent) {
+    const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, alphaTest: translucent ? 0.05 : 0.5, depthWrite: !translucent });
+    (async () => {
+      const imgs = await Promise.all(layers.map(l => userPack && userPack.get(l.key) ? loadImg(l.key) : null));
+      if (!imgs[0]) return;
+      const c = document.createElement("canvas"); c.width = imgs[0].width; c.height = imgs[0].height; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+      layers.forEach((l, i) => {
+        const img = imgs[i]; if (!img) return;
+        if (l.tint == null) { g.drawImage(img, 0, 0, c.width, c.height); return; }
+        const t = document.createElement("canvas"); t.width = c.width; t.height = c.height; const tg = t.getContext("2d"); tg.imageSmoothingEnabled = false;
+        tg.drawImage(img, 0, 0, c.width, c.height); tg.globalCompositeOperation = "multiply"; tg.fillStyle = "#" + l.tint.toString(16).padStart(6, "0"); tg.fillRect(0, 0, c.width, c.height);
+        tg.globalCompositeOperation = "destination-in"; tg.drawImage(img, 0, 0, c.width, c.height);
+        g.drawImage(t, 0, 0);
+      });
+      const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
+      mat.map = tex; mat.color.setScalar(worldLight); mat.needsUpdate = true;
+    })();
+    return mat;
+  }
+  // Armour on players and on zombies, skeletons, piglins…: Minecraft's armour layers over the body.
+  const ARMOUR_MAT = { leather: "leather", chainmail: "chainmail", iron: "iron", golden: "gold", diamond: "diamond", netherite: "netherite", turtle: "turtle" };
+  const armourMats = new Map();
+  function armourMat(file, tint) {
+    const k = file + "|" + tint; if (armourMats.has(k)) return armourMats.get(k);
+    const layers = [{ key: "models/armor/" + file, tint }]; if (file.startsWith("leather_")) layers.push({ key: "models/armor/" + file.replace(".png", "") + "_overlay" });
+    const m = layeredMat(layers, 0xffffff); armourMats.set(k, m); return m;
+  }
+  /* slots: {head, body, ra, la, rl, ll}: [group, centre x, y, z in pixels]. */
+  function wearArmour(a, ar) {
+    const key = JSON.stringify(ar || 0); if (a.armourKey === key) return; a.armourKey = key;
+    (a.armour || []).forEach(m => m.parent && m.parent.remove(m)); a.armour = [];
+    if (!ar || !a.slots) return;
+    const piece = (slot, u, v, w, h, d, inf, mat, mirror) => {
+      const s = a.slots[slot]; if (!s) return;
+      const geo = new THREE.BoxGeometry((w + inf * 2) * PX, (h + inf * 2) * PX, (d + inf * 2) * PX); boxUV(geo, u, v, w, h, d, 64, 32, mirror);
+      const m = new THREE.Mesh(geo, mat); m.position.set(s[1] * PX, s[2] * PX, s[3] * PX); s[0].add(m); a.armour.push(m);
+    };
+    ar.forEach((it, i) => {
+      if (!it) return;
+      const [name, col] = it.split("#"), mm = name.match(/^(leather|chainmail|iron|golden|diamond|netherite|turtle)_(helmet|chestplate|leggings|boots)$/) || (name === "turtle_helmet" ? [0, "turtle", "helmet"] : null);
+      if (!mm) return;
+      const mat = ARMOUR_MAT[mm[1]], tint = mm[1] === "leather" ? (col ? +col : 0xA06540) : null;
+      const m1 = armourMat(mat + "_layer_1", tint), m2 = armourMat(mat + "_layer_2", tint);
+      if (i === 0) piece("head", 0, 0, 8, 8, 8, 1, m1);
+      if (i === 1) { piece("body", 16, 16, 8, 12, 4, 1, m1); piece("ra", 40, 16, 4, 12, 4, 1, m1); piece("la", 40, 16, 4, 12, 4, 1, m1, true); }
+      if (i === 2) { piece("body", 16, 16, 8, 12, 4, 0.5, m2); piece("rl", 0, 16, 4, 12, 4, 0.5, m2); piece("ll", 0, 16, 4, 12, 4, 0.5, m2, true); }
+      if (i === 3) { piece("rl", 0, 16, 4, 12, 4, 1, m1); piece("ll", 0, 16, 4, 12, 4, 1, m1, true); }
+    });
+  }
   function modelMat(key, colour, translucent) {
     const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, alphaTest: translucent ? 0.05 : 0.5, depthWrite: !translucent });
     if (userPack && userPack.get(key)) loadImg(key).then(img => { if (!img) return; const t = new THREE.Texture(img); t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; mat.map = t; mat.color.setScalar(worldLight); mat.needsUpdate = true; });
     return mat;
   }
   function buildMob(def, p) {
-    const col = mobColour(p.name), mats = [modelMat(def.tex, col, def.translucent)];
-    if (def.tex2) mats.push(modelMat(def.tex2, 0xffffff));
+    const col = mobColour(p.name), look = looksOf(p, def), mats = [layeredMat(look.layers, col, def.translucent)];
+    if (def.tex2) { const fur = layeredMat([{ key: def.tex2, tint: look.fur }], 0xffffff); fur.visible = !look.noFur; mats.push(fur); }
     const root = new THREE.Group(), model = new THREE.Group(); root.add(model);
     // Grown-ups by their height, babies smaller, slimes by their size.
     let k = def.size === "w" ? Math.max(0.2, p.w) / 0.52 : Math.max(0.3, Math.min(1.6, (p.h || def.h) / def.h)) * (def.scale || 1);
     if (def.scale && !p.h) k = def.scale;
+    const baby = p.md && p.md.baby;
+    if (baby) k *= 0.5;
     model.scale.setScalar(k); model.position.y = 0;
-    const inner = new THREE.Group(); inner.position.y = 24 * PX; model.add(inner);
+    const inner = new THREE.Group(); inner.position.y = def.originY !== undefined ? def.originY : 24 * PX; model.add(inner);
+    if (def.rotY) inner.rotation.y = def.rotY;
     const parts = {};
     for (const part of def.parts) {
+      if (part.opt && !look[part.opt]) continue;
       const g = new THREE.Group(); g.position.set(part.at[0] * PX, -part.at[1] * PX, -part.at[2] * PX);
       if (part.rot) { g.rotation.order = "ZYX"; g.rotation.set(part.rot[0], -part.rot[1], -part.rot[2]); }
       for (const b of part.b || []) {
@@ -1259,12 +1404,63 @@
     scene.add(root);
     const legs = def.legs.map(([n]) => parts[n]).filter(Boolean), signs = def.legs.map(([, sg]) => sg);
     const head = parts.head || new THREE.Group();
+    if (baby && def.legs === QUAD_LEGS) head.scale.setScalar(1.5);
+    // Camels: a saddle pad on the back.
+    if (look.saddle && parts.body && /camel/.test(p.name)) { const sad = new THREE.Mesh(new THREE.BoxGeometry(10.2 * PX, 2 * PX, 9 * PX), new THREE.MeshBasicMaterial({ color: 0x5a3a22 })); sad.position.set(0, (/camel/.test(p.name) ? 13.5 : 1) * PX, (/camel/.test(p.name) ? 4 : 5) * PX); parts.body.add(sad); }
+    if (look.charged) mats.forEach(m => { m.color.setRGB(0.7, 0.85, 1.3); });
+    // Armour and held items for the ones shaped like people.
+    const slots = parts.ra && parts.rl ? { head: [parts.head, 0, 4, 0], body: [parts.body, 0, -6, 0], ra: [parts.ra, -1, -4, 0], la: [parts.la, 1, -4, 0], rl: [parts.rl, 0, -6, 0], ll: [parts.ll, 0, -6, 0] } : null;
     // Wings flap (about their own axis), blaze rods and the like turn.
     const flaps = (def.flap || []).filter(([n]) => parts[n]).map(([n, ax, amp, speed]) => [parts[n], ax, amp, speed || 1, parts[n].rotation[ax]]);
     const spins = (def.spin || []).filter(n => parts[n]).map(n => parts[n]);
-    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats, flaps, spins, hover: def.hover || 0 };
+    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats, flaps, spins, hover: def.hover || 0, slots, look: lookKey(p), handPart: parts.ra || null };
+  }
+
+  const boatDef = tex => ({ tex, tw: 128, th: 64, h: 0.5625, originY: 0.375, rotY: P2, parts: [
+    { n: "bottom", at: [0, 3, 1], rot: [P2, 0, 0], b: [[0, 0, -14, -9, -3, 28, 16, 3]] },
+    { n: "back", at: [-15, 4, 4], rot: [0, 3 * P2, 0], b: [[0, 19, -13, -7, -1, 18, 6, 2]] },
+    { n: "front", at: [15, 4, 0], rot: [0, P2, 0], b: [[0, 27, -8, -7, -1, 16, 6, 2]] },
+    { n: "right", at: [0, 4, -9], rot: [0, Math.PI, 0], b: [[0, 35, -14, -7, -1, 28, 6, 2]] },
+    { n: "left", at: [0, 4, 9], b: [[0, 43, -14, -7, -1, 28, 6, 2]] }], legs: [] });
+  Object.assign(MOBS, {
+    minecart: { tex: "entity/minecart", tw: 64, th: 32, h: 0.7, originY: 0.375, rotY: P2, parts: [
+      { n: "bottom", at: [0, 4, 0], rot: [P2, 0, 0], b: [[0, 10, -10, -8, -1, 20, 16, 2]] },
+      { n: "front", at: [-9, 4, 0], rot: [0, 3 * P2, 0], b: [[0, 0, -8, -9, -1, 16, 8, 2]] },
+      { n: "back", at: [9, 4, 0], rot: [0, P2, 0], b: [[0, 0, -8, -9, -1, 16, 8, 2]] },
+      { n: "left", at: [0, 4, -7], rot: [0, Math.PI, 0], b: [[0, 0, -8, -9, -1, 16, 8, 2]] },
+      { n: "right", at: [0, 4, 7], b: [[0, 0, -8, -9, -1, 16, 8, 2]] }], legs: [] },
+    boat: boatDef("entity/boat/oak"), chest_boat: boatDef("entity/chest_boat/oak"),
+    arrow: { tex: "entity/projectiles/arrow", tw: 32, th: 32, h: 0.5, originY: 0.1, rotY: P2, parts: [
+      { n: "a", at: [0, 0, 0], b: [[0, 0, -8, -2.5, 0, 16, 5, 0], [0, 0, -8, 0, -2.5, 16, 0, 5]] }], legs: [] },
+  });
+  MOBS.spectral_arrow = Object.assign({}, MOBS.arrow, { tex: "entity/projectiles/spectral_arrow" });
+  const BOAT_WOOD = ["oak", "spruce", "birch", "jungle", "acacia", "cherry", "dark_oak", "mangrove", "bamboo"];
+  const PAINTINGS = { kebab: [1, 1], aztec: [1, 1], alban: [1, 1], aztec2: [1, 1], bomb: [1, 1], plant: [1, 1], wasteland: [1, 1], pool: [2, 1], courbet: [2, 1], sea: [2, 1], sunset: [2, 1], creebet: [2, 1], wanderer: [1, 2], graham: [1, 2], match: [2, 2], bust: [2, 2], stage: [2, 2], void: [2, 2], skull_and_roses: [2, 2], wither: [2, 2], fighters: [4, 2], pointer: [4, 4], pigscene: [4, 4], burning_skull: [4, 4], skeleton: [4, 3], earth: [2, 2], wind: [2, 2], water: [2, 2], fire: [2, 2], donkey_kong: [4, 3] };
+  const THROWN = { snowball: "snowball", egg: "egg", ender_pearl: "ender_pearl", experience_bottle: "experience_bottle", potion: "splash_potion", small_fireball: "fire_charge", fireball: "fire_charge", eye_of_ender: "ender_eye", firework_rocket: "firework_rocket", trident: "trident", llama_spit: "white_dye", wither_skull: "wither_skeleton_skull" };
+  /* Things that are not creatures: blocks (TNT), thrown items, experience orbs, paintings. */
+  function makeThing(p) {
+    const root = new THREE.Group(), md = p.md || {};
+    let body = new THREE.Group(); root.add(body);
+    if (p.name === "tnt") { const m = itemMesh("tnt", "drop"); m.scale.setScalar(4); m.position.y = 0.5; body.add(m); }
+    else if (THROWN[p.name]) { const m = itemMesh(THROWN[p.name], "drop"); m.scale.setScalar(1.4); m.position.y = 0.15; body.add(m); }
+    else if (p.name === "experience_orb") {
+      const mat = new THREE.SpriteMaterial({ color: 0xc8ff50, transparent: true });
+      if (userPack && userPack.get("entity/experience_orb")) loadImg("entity/experience_orb").then(img => { if (!img) return; const c = document.createElement("canvas"); c.width = c.height = 16; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; const k = img.width / 64; g.drawImage(img, 0, 0, 16 * k, 16 * k, 0, 0, 16, 16); mat.map = nearestTex(c); mat.needsUpdate = true; });
+      const s = new THREE.Sprite(mat); s.scale.setScalar(0.3); s.position.y = 0.2; body.add(s);
+    } else if (p.name === "painting") {
+      const keys = Object.keys(PAINTINGS), name = keys[md.painting_variant || 0] || "kebab", [w, h] = PAINTINGS[name];
+      const mat = new THREE.MeshBasicMaterial({ color: 0x9a7a55 });
+      if (userPack && userPack.get("painting/" + name)) loadImg("painting/" + name).then(img => { if (!img) return; const t = new THREE.Texture(img); t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; mat.map = t; mat.color.setScalar(worldLight); mat.needsUpdate = true; });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(0, 0, 0); body.add(m);
+      root.mats = [mat];
+    } else return null;
+    scene.add(root);
+    return { root, body, head: new THREE.Group(), legs: [], phase: 0, x: p.x, z: p.z, mob: true, mats: root.mats || [], flaps: [], spins: [], look: lookKey(p) };
   }
   function makeMob(p) {
+    const thing = makeThing(p); if (thing) return thing;
+    if (p.name === "tropical_fish" && p.md && (p.md.type_variant & 255) === 1) return buildMob(MOBS.tropical_fish_b, p);
+    if (/^(chest_)?boat$/.test(p.name)) { const d = Object.assign({}, MOBS[p.name]); d.tex = "entity/" + p.name + "/" + (BOAT_WOOD[(p.md && p.md.type) || 0] || "oak"); return buildMob(d, p); }
     if (MOBS[p.name]) return buildMob(MOBS[p.name], p);
     const root = new THREE.Group();
     const col = mobColour(p.name), dark = col.clone().multiplyScalar(0.7);
@@ -1310,7 +1506,7 @@
     const armR = limb(40, 16, -6, 24), armL = limb(32, 48, 6, 24), legR = limb(0, 16, -2, 12), legL = limb(16, 48, 2, 12);
     if (p.name) root.add(nameTag(p.name, p.team));
     scene.add(root);
-    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat] };
+    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat], slots: { head: [head, 0, 4, 0], body: [body, 0, 18, 0], ra: [armR, 0, -6, 0], la: [armL, 0, -6, 0], rl: [legR, 0, -6, 0], ll: [legL, 0, -6, 0] } };
   }
   const avatars = new Map();
   // ---------- items in hands and on the ground, the first-person hand, swings (as Minecraft draws them) ----------
@@ -1351,7 +1547,7 @@
   // The first-person hand lives in its own scene, drawn over the world, as in Minecraft.
   const handScene = new THREE.Scene();
   var handCam = new THREE.PerspectiveCamera(70, cv.clientWidth / Math.max(1, cv.clientHeight) || 2, 0.01, 10);
-  const fp = new THREE.Group(); fp.matrixAutoUpdate = false; handScene.add(fp); window.__fp = () => ({ arm: !!fpArm, vis: fpArm && fpArm.visible, item: fpItemName, kids: fp.children.length });
+  const fp = new THREE.Group(); fp.matrixAutoUpdate = false; handScene.add(fp);
   let fpItem = null, fpItemName = null, fpArm = null, fpSkin = null, swingAt = -1e9, equipAt = 0, walkDist = 0, bob = 0, lastPos = null;
   function fpSetItem(name) {
     if (name === fpItemName) return;
@@ -2090,7 +2286,7 @@
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
     const prev = new Map(a.d.p.map(q => [q[0], q]));
-    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", keeper: String(q[0]).startsWith("a") }; });
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", md: q[14] || 0, ar: q[15] || 0, keeper: String(q[0]).startsWith("a") }; });
     const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
     return { people, ball, latest: b.d };
   }
@@ -2133,7 +2329,7 @@
       for (const p of st.people) {
         seen.add(p.id);
         let a = avatars.get(p.id);
-        if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
+        if (!a || a.skin !== p.skin || a.team !== p.team || a.name !== p.name || (a.look && a.look !== lookKey(p))) { if (a) scene.remove(a.root); a = makeAvatar(p); a.skin = p.skin; a.team = p.team; a.name = p.name; avatars.set(p.id, a); }
         const isMe = p.id === myId;
         const px = isMe ? me.rx : p.x, py = isMe ? me.ry : p.y, pz = isMe ? me.rz : p.z, yawDeg = isMe ? me.yaw : p.yaw, pitch = isMe ? me.pitch : p.pitch, sneak = isMe ? me.sneak : p.sneak;
         // Minecraft's walk animation: speed = blocks per tick × 4 (at most 1), eased by 0.4 a tick; the limbs
@@ -2153,6 +2349,8 @@
           if (key !== a.lit) { a.lit = key; a.mats.forEach(m => { if (m.map || !a.mob) m.color.setRGB(worldLight, (hurt ? 0.45 : 1) * worldLight, (hurt ? 0.45 : 1) * worldLight); }); }
         }
         if (isMe) fpSetSkin(p.skin, p.team);
+        if (a.slots) wearArmour(a, p.ar);
+        if (a.mob && a.handPart && a.held !== p.held) { if (a.heldMesh) a.handPart.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.set(-1 * PX, -9 * PX, 0); a.handPart.add(a.heldMesh); } }
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
         if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
         if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
