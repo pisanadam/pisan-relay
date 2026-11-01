@@ -122,7 +122,7 @@
     <label for="name" class="ligOnly">Oyuncu adı</label>
     <input class="field ligOnly" id="name" maxlength="16" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
     <label>Sunucu</label>
-    <div class="row"><button class="mcbtn sel" id="srvLig" type="button">Pisan Lig</button><button class="mcbtn" id="srvPvp" type="button">Pisan PvP</button></div>
+    <div class="row"><button class="mcbtn sel" id="srvLig" type="button">Pisan Lig</button><button class="mcbtn" id="srvStrike" type="button">Pisan Strike</button><button class="mcbtn" id="srvPvp" type="button">Pisan PvP</button></div>
     <p class="note" id="srvNote">Pisan Lig: sadece adınla girersin.</p>
     <label for="skin" class="ligOnly">Skin (bir Minecraft kullanıcı adı, isteğe bağlı)</label>
     <input class="field ligOnly" id="skin" maxlength="16" placeholder="Notch" autocapitalize="off" spellcheck="false">
@@ -322,18 +322,20 @@
     ws.onclose = () => { ws = null; if (playing) $("loginErr").textContent = "Bağlantı koptu; sunucu kapanmış olabilir."; playing = false; show("login"); };
   }
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
-  // Pisan Lig (name only, "(mobil)" in front) or Pisan PvP (online mode: sign in with your Minecraft account).
-  let server = store.get("pisan-web-server") === "pvp" ? "pvp" : "";
+  // Pisan Lig and Pisan Strike (name only, "(mobil)" in front) or Pisan PvP (online mode: sign in with your Minecraft account).
+  let server = ["pvp", "strike"].includes(store.get("pisan-web-server")) ? store.get("pisan-web-server") : "";
   function pickServer(s) {
-    server = s; $("srvLig").classList.toggle("sel", !s); $("srvPvp").classList.toggle("sel", s === "pvp");
-    $("srvNote").textContent = s === "pvp" ? "Pisan PvP: gerçek Minecraft hesabınla (Microsoft) girersin; ad ve skin hesabından gelir." : "Pisan Lig: sadece adınla girersin; adının başında (mobil) yazar.";
+    server = s; $("srvLig").classList.toggle("sel", !s); $("srvPvp").classList.toggle("sel", s === "pvp"); $("srvStrike").classList.toggle("sel", s === "strike");
+    $("srvNote").textContent = s === "pvp" ? "Pisan PvP: gerçek Minecraft hesabınla (Microsoft) girersin; ad ve skin hesabından gelir."
+      : s === "strike" ? "Pisan Strike: CS2 tarzı silahlı maçlar. Sadece adınla girersin; adının başında (mobil) yazar."
+      : "Pisan Lig: sadece adınla girersin; adının başında (mobil) yazar.";
     document.querySelectorAll(".ligOnly").forEach(e => e.style.display = s === "pvp" ? "none" : "");
   }
-  $("srvLig").onclick = () => pickServer(""); $("srvPvp").onclick = () => pickServer("pvp");
+  $("srvLig").onclick = () => pickServer(""); $("srvPvp").onclick = () => pickServer("pvp"); $("srvStrike").onclick = () => pickServer("strike");
   pickServer(server);
   $("go").onclick = () => {
     const n = $("name").value.trim(), skin = $("skin").value.trim(), auth = server === "pvp" ? "microsoft" : "offline";
-    if (!server && !/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Pisan Lig için ad 3–9 karakter (başına (mobil) eklenir)."; return; }
+    if (server !== "pvp" && !/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Ad 3–9 karakter olmalı (başına (mobil) eklenir)."; return; }
     if (skin && !/^[A-Za-z0-9_]{1,16}$/.test(skin)) { $("loginErr").textContent = "Skin adı geçersiz."; return; }
     store.set("pisan-web-name", n); store.set("pisan-web-skin", skin); store.set("pisan-web-server", server);
     $("loginErr").textContent = "Bağlanıyor…";
@@ -447,6 +449,8 @@
     if (m.endsWith("_banner")) return [m.replace("_banner", "_wool")];
     if (m.endsWith("_wall_sign") || m.endsWith("_sign")) return [m.replace(/_wall_sign$|_sign$/, "_planks")];
     if (m.endsWith("_pane")) m = m.slice(0, -5);
+    // smooth sandstone, smooth quartz…: the top (or bottom) face of the block they come from
+    if (m.startsWith("smooth_") && m !== "smooth_stone" && m !== "smooth_basalt" && !/_(slab|stairs)$/.test(m)) { const b = m.slice(7); return [m, b + "_top", b + "_block_bottom", b]; }
     for (const suffix of ["_wall", "_slab", "_stairs", "_fence"]) if (m.endsWith(suffix)) { const b = m.slice(0, -suffix.length); return [b, b + "s", b + "_planks"]; }
     if (face === "top") return [m + "_top", m];
     if (face === "bottom") return [m + "_bottom", m + "_top", m];
@@ -2169,7 +2173,7 @@
     }, ms);
   }
   // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
-  const ITEM_ALIAS = { compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
+  const ITEM_ALIAS = { crossbow: "crossbow_standby", compass: "compass_00", clock: "clock_00", recovery_compass: "recovery_compass_00" };
 
   // ---------- blocks Minecraft draws as models: chests, shulker boxes, beds, banners, signs, heads, bells, pots… ----------
   const beMats = new Map();
@@ -2857,7 +2861,7 @@
      keeps you on edges, ladders hold you, cobwebs and soul sand slow you, knockback pushes you, potions count. */
   const FLUIDS_W = /^(WATER|BUBBLE_COLUMN|KELP|KELP_PLANT|SEAGRASS|TALL_SEAGRASS)$/;
   const CLIMB = /LADDER|^VINE$|SCAFFOLDING|TWISTING_VINES|WEEPING_VINES|CAVE_VINES/;
-  const USABLE = /^(bow|crossbow|trident|shield|spyglass|goat_horn|potion|milk_bucket|honey_bottle|apple|bread|cookie|melon_slice|carrot|potato|baked_potato|poisonous_potato|beetroot|beef|cooked_beef|porkchop|cooked_porkchop|chicken|cooked_chicken|mutton|cooked_mutton|rabbit|cooked_rabbit|cod|cooked_cod|salmon|cooked_salmon|tropical_fish|pufferfish|pumpkin_pie|golden_apple|enchanted_golden_apple|golden_carrot|sweet_berries|glow_berries|dried_kelp|mushroom_stew|rabbit_stew|beetroot_soup|suspicious_stew|chorus_fruit|rotten_flesh|spider_eye)$/;
+  const USABLE = /^(bow|trident|shield|spyglass|goat_horn|potion|milk_bucket|honey_bottle|apple|bread|cookie|melon_slice|carrot|potato|baked_potato|poisonous_potato|beetroot|beef|cooked_beef|porkchop|cooked_porkchop|chicken|cooked_chicken|mutton|cooked_mutton|rabbit|cooked_rabbit|cod|cooked_cod|salmon|cooked_salmon|tropical_fish|pufferfish|pumpkin_pie|golden_apple|enchanted_golden_apple|golden_carrot|sweet_berries|glow_berries|dried_kelp|mushroom_stew|rabbit_stew|beetroot_soup|suspicious_stew|chorus_fruit|rotten_flesh|spider_eye)$/;
   let rightHeld = false, effects = { s: 0, sl: 0, j: 0, sf: 0, lev: 0 };
   function usingItem() {
     if (!rightHeld || !lastHotbar) return false;

@@ -21,6 +21,7 @@ const PORT = +(process.argv[2] || process.env.PORT || 25565);
 const KEY = (process.argv[3] || process.env.RELAY_KEY || readFile("pisan-relay-key.txt") || "").trim();
 const HOME_SERVER = (process.env.MC_SERVER || "pisan-sf-league.exaroton.me").toLowerCase();
 const PVP_SERVER = (process.env.PVP_SERVER || "pisanpvp.exaroton.me").toLowerCase();
+const STRIKE_SERVER = (process.env.STRIKE_SERVER || "pisanstrike.exaroton.me").toLowerCase();
 const WEB = path.join(__dirname, "web");
 const MAX_PLAYERS = 40;
 const MAX_PER_IP = 3;
@@ -185,14 +186,16 @@ class Session {
   hello(o) {
     if (this.bot || this.connecting) return;
     const name = String(o.name || "").trim(), skin = String(o.skin || "").trim();
-    // Two servers only: Pisan Lig (cracked, "(mobil)" names) and Pisan PvP (online mode: a real Minecraft account).
-    const pvp = String(o.server || "").trim().toLowerCase() === "pvp";
-    const addr = (pvp ? PVP_SERVER : HOME_SERVER).split(":");
+    // Three servers only: Pisan Lig and Pisan Strike (cracked, "(mobil)" names) and Pisan PvP (online mode: a real
+    // Minecraft account).
+    const srv = String(o.server || "").trim().toLowerCase(), pvp = srv === "pvp", strike = srv === "strike";
+    const addr = (pvp ? PVP_SERVER : strike ? STRIKE_SERVER : HOME_SERVER).split(":");
     this.host = addr[0]; this.port = +addr[1] || 25565;
-    this.home = !pvp; this.pvp = pvp;
+    this.home = !pvp && !strike; this.pvp = pvp; this.strike = strike;
+    this.label = pvp ? "Pisan PvP" : strike ? "Pisan Strike" : "Pisan Lig";
     this.microsoft = pvp;
-    if (this.home) {
-      if (!/^[A-Za-z0-9_]{3,9}$/.test(name)) return this.send({ t: "error", text: "Ad 3–9 karakter olmalı: harf, rakam ve _ (Pisan Lig'de başına (mobil) eklenir)." });
+    if (this.home || this.strike) {
+      if (!/^[A-Za-z0-9_]{3,9}$/.test(name)) return this.send({ t: "error", text: "Ad 3–9 karakter olmalı: harf, rakam ve _ (başına (mobil) eklenir)." });
       this.name = "(mobil)" + name;
     } else {
       // Pisan PvP: the name is the Microsoft account's own; this one only keys the sign-in for this session.
@@ -206,7 +209,7 @@ class Session {
     if (this.closed) return;
     this.connecting = true;
     this.everSpawned = false; this.lastKick = "";
-    this.send({ t: "waking", text: (this.home ? "Pisan Lig" : "Pisan PvP") + " sunucusuna bağlanılıyor…" });
+    this.send({ t: "waking", text: this.label + " sunucusuna bağlanılıyor…" });
     const options = { host: this.host, port: this.port, username: this.name, hideErrors: true, checkTimeoutInterval: 60000, version: "1.20.1" };
     if (this.microsoft) {
       // Microsoft sign-in with a device code; the token lives only for this session.
@@ -253,8 +256,9 @@ class Session {
       bot._client.on("ping", p => { if (this.txq.length || (this.changes && this.changes.length) || !this.regionAt) this.txq.push(p.id); else this.sendTx(p.id); });
     });
     bot.once("login", () => {
-      if (!this.home) return;
-      // Pisan Lig: prove this "(mobil)" player comes from the relay, and let the plugin send the extras.
+      if (this.pvp) return;
+      // Pisan Lig and Pisan Strike: prove this "(mobil)" player comes from the relay (and, on Pisan Lig, let the
+      // plugin send the extras).
       bot._client.write("custom_payload", { channel: "minecraft:register", data: Buffer.from("pisan:web") });
       bot._client.write("custom_payload", { channel: "pisan:web", data: Buffer.from(JSON.stringify({ key: KEY, skin: this.skin })) });
     });
@@ -268,7 +272,7 @@ class Session {
       log("Girdi:", this.name, "→", this.host, bot.version);
       this.meId = (bot.player && bot.player.uuid || "me").slice(0, 8);
       this.Block = require("prismarine-block")(bot.registry);
-      this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : "Pisan PvP", version: bot.version });
+      this.send({ t: "welcome", name: this.name, me: this.meId, server: this.label, version: bot.version });
       // States follow the server's ticks (the plugin's extras arrive once per tick); the timer covers other servers.
       this.timer = setInterval(() => {
         if (Date.now() - (this.extrasAt || 0) > 200) this.tick();
@@ -563,7 +567,7 @@ class Session {
     for (let i = 9; i < 45; i++) own.push(itemJson(bot.inventory.slots[i]));
     const armor = [5, 6, 7, 8, 45].map(i => itemJson(bot.inventory.slots[i]));
     const craft = [0, 1, 2, 3, 4].map(i => itemJson(bot.inventory.slots[i]));
-    this.send({ t: "menu", title: "Envanter", type: "inventory", size: 0, items: [], own, ownStart: 9, inv: true, armor, craft, cursor: itemJson(bot.inventory.selectedItem), skin: this.skin || (this.home ? "" : this.name) });
+    this.send({ t: "menu", title: "Envanter", type: "inventory", size: 0, items: [], own, ownStart: 9, inv: true, armor, craft, cursor: itemJson(bot.inventory.selectedItem), skin: this.skin || (this.pvp ? this.name : "") });
   }
 
   /* Block shapes by state (stairs, slabs, fences…), worked out once per state. */
