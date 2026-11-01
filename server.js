@@ -245,7 +245,12 @@ class Session {
         const b = this.box;
         if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
       });
-      bot.on("respawn", () => { this.regionAt = null; });
+      bot.on("respawn", () => { this.regionAt = null; this.send({ t: "noworld" }); });
+      // Knockback and explosions push us: the page moves by them, and the check allows for them.
+      this.move = { air: 0, rise: 0, hover: 0, kbH: 0, kbY: 0 };
+      const push = (vx, vy, vz) => { this.move.kbH = Math.max(this.move.kbH, Math.hypot(vx, vz) + 0.1); this.move.kbY = Math.max(this.move.kbY, vy + 0.1); this.send({ t: "vel", v: [vx, vy, vz] }); };
+      bot._client.on("entity_velocity", p => { if (bot.entity && p.entityId === bot.entity.id) { const v = p.velocity || { x: p.velocityX, y: p.velocityY, z: p.velocityZ }; push(v.x / 8000, v.y / 8000, v.z / 8000); }; });
+      bot._client.on("explosion", p => { const x = p.playerMotionX ?? (p.playerKnockback && p.playerKnockback.x), y = p.playerMotionY ?? (p.playerKnockback && p.playerKnockback.y), z = p.playerMotionZ ?? (p.playerKnockback && p.playerKnockback.z); if (x || y || z) push(+x || 0, +y || 0, +z || 0); });
       bot._client.on("tile_entity_data", p => {
         const l = p.location, b = this.box; if (!b || !l || l.x < b.x0 || l.x > b.x1 || l.z < b.z0 || l.z > b.z1 || l.y < b.y0 || l.y >= b.y1) return;
         setTimeout(() => { const d = this.beOf(l.x, l.y, l.z); this.send({ t: "be", list: [[l.x, l.y, l.z, d]] }); }, 50);
@@ -325,19 +330,24 @@ class Session {
     switch (o.t) {
       case "in": {
         const f = +o.f || 0;
-        const sprint = !!o.run && f > 0.3 && !o.sneak;
+        // Sprinting as a client may: forward, not sneaking, not starving (food above 6).
+        const sprint = !!o.run && f > 0.3 && !o.sneak && (bot.food === undefined || bot.food > 6);
         if (bot.getControlState("sprint") !== sprint) bot.setControlState("sprint", sprint);
         if (bot.getControlState("sneak") !== !!o.sneak) bot.setControlState("sneak", !!o.sneak);
         if (Number.isFinite(+o.yaw) && Number.isFinite(+o.pitch)) { bot.entity.yaw = toYaw(+o.yaw); bot.entity.pitch = toPitch(Math.max(-90, Math.min(90, +o.pitch))); }
         // The page moves the player (with collisions), as a Minecraft client does; the client here only reports it.
         // After a server teleport, positions from before the page saw it are ignored.
-        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq &&
-            Math.hypot(o.pos[0] - bot.entity.position.x, o.pos[2] - bot.entity.position.z) < 8) {
-          bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
-          bot.entity.onGround = !!o.ground;
-          bot.entity.velocity.set(0, 0, 0);
-          // Straight to the server now, not on mineflayer's next 50 ms beat: a kick or a hit right after sees where you really are.
-          bot._client.write("position_look", { x: o.pos[0], y: o.pos[1], z: o.pos[2], yaw: Math.fround(fromYaw(bot.entity.yaw)), pitch: Math.fround(fromPitch(bot.entity.pitch)), onGround: !!o.ground });
+        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq) {
+          const check = this.checkMove(o.pos, !!o.sneak);
+          if (check.ok) {
+            bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
+            bot.entity.onGround = check.ground;
+          } else {
+            // Not a move a Minecraft client could make: it never reaches the server; the page is put back.
+            this.tpSeq++;
+            this.rejects = (this.rejects || 0) + 1;
+            if (this.rejects === 1 || this.rejects % 50 === 0) log("Geçersiz hareket engellendi:", this.name, check.why, "(" + this.rejects + ")");
+          }
         }
         break;
       }
@@ -349,7 +359,7 @@ class Session {
         break;
       case "close": if (bot.currentWindow) bot.closeWindow(bot.currentWindow); break;
       case "inv": this.inventory(); break;
-      case "chat": if (typeof o.text === "string" && o.text.trim()) bot.chat(o.text.trim().slice(0, 250)); break;
+      case "chat": { const now = Date.now(); if (now - (this.lastChat || 0) < 400) break; this.lastChat = now; if (typeof o.text === "string" && o.text.trim()) bot.chat(o.text.trim().slice(0, 256)); break; }
     }
   }
 
@@ -358,14 +368,16 @@ class Session {
     const bot = this.bot;
     const held = bot.heldItem;
     if (a === "ldown") {
-      const entity = bot.entityAtCursor(3.5);
+      const creative = bot.game && bot.game.gameMode === "creative";
+      const now = Date.now(); if (now - (this.lastAttack || 0) < 50) return; this.lastAttack = now;
+      const entity = bot.entityAtCursor(creative ? 5 : 3);
       if (entity) {
         bot.attack(entity);
-        // A hit while running makes the server drop the run; DEPAR is still on, so take it up again.
-        if (bot.getControlState("sprint")) bot._client.write("entity_action", { entityId: bot.entity.id, actionId: 3, jumpBoost: 0 });
+        // As a client does: a hit while sprinting ends the sprint; holding DEPAR starts it again next tick.
+        if (bot.getControlState("sprint")) bot.setControlState("sprint", false);
         return;
       }
-      const block = !adventure && bot.blockAtCursor(5);
+      const block = !adventure && bot.blockAtCursor(creative ? 5 : 4.5);
       if (block && block.name !== "air" && bot.canDigBlock(block)) {
         const p = block.position, name = block.name;
         bot.dig(block, "ignore").then(() => this.send({ t: "blk", k: "break", n: name, x: p.x + 0.5, y: p.y + 0.5, z: p.z + 0.5 })).catch(() => { });
@@ -378,9 +390,10 @@ class Session {
       this.act("ldown", adventure);
       setTimeout(() => this.act("lup", adventure), 60);
     } else if (a === "rdown") {
-      const entity = bot.entityAtCursor(3.5);
+      const creative = bot.game && bot.game.gameMode === "creative";
+      const entity = bot.entityAtCursor(creative ? 5 : 3);
       if (entity && entity.type !== "object") { bot.activateEntity(entity).catch(() => { }); return; }
-      const block = bot.blockAtCursor(5);
+      const block = bot.blockAtCursor(creative ? 5 : 4.5);
       if (block && block.name !== "air" && !adventure) {
         if (INTERACTIVE.test(block.name) && !bot.getControlState("sneak")) { bot.activateBlock(block).catch(() => { }); return; }
         if (held && bot.registry.blocksByName[held.name] && block.face !== undefined) {
@@ -417,7 +430,10 @@ class Session {
     const high = !!camera || (bot.game && bot.game.gameMode === "spectator");
     let centre = view;
     if (high) { const yaw = (camera ? camera[3] : fromYaw(bot.entity.yaw)) * Math.PI / 180; centre = view.offset(-Math.sin(yaw) * 22, 0, Math.cos(yaw) * 22); }
-    if (!this.regionAt || this.regionAt.distanceTo(centre) > (high ? 10 : 26) || this.regionHigh !== high || (this.dirty && Date.now() - (this.regionSent || 0) > 2000)) { this.regionAt = centre.clone(); this.regionHigh = high; this.dirty = false; this.changes = []; this.regionSent = Date.now(); this.region(centre, high); }
+    // The ground under the player has not arrived yet: wait for it rather than send an empty world (the page would fall).
+    const ground = bot.world.getColumnAt && !bot.world.getColumnAt(bot.entity.position);
+    if (ground) { this.regionAt = null; }
+    else if (!this.regionAt || this.regionAt.distanceTo(centre) > (high ? 10 : 26) || this.regionHigh !== high || (this.dirty && Date.now() - (this.regionSent || 0) > 2000)) { this.regionAt = centre.clone(); this.regionHigh = high; this.dirty = false; this.changes = []; this.regionSent = Date.now(); this.region(centre, high); }
     else if (this.changes && this.changes.length) {
       // Single blocks that changed (dug, placed, doors): only those, with their palette entries.
       const list = this.changes.splice(0, 400).map(([x, y, z, sid]) => {
@@ -460,6 +476,7 @@ class Session {
     if (this.tpSent !== this.tpSeq) { this.tpSent = this.tpSeq; o.yaw = Math.round(fromYaw(bot.entity.yaw) * 10) / 10; o.pitch = Math.round(fromPitch(bot.entity.pitch) * 10) / 10; }
     if (x.b) { o.b = x.b; o.r = x.r; o.bl = x.bl; o.c = x.c; o.ph = x.ph; o.pause = x.pause; }
     if (camera) o.cam = camera;
+    { const fx = this.effectsOf(); if (fx.s || fx.sl || fx.j || fx.sf || fx.lev) o.fx = fx; }
     if (bot.time) { o.time = bot.time.timeOfDay; o.mp = bot.time.moonPhase || 0; }
     if (bot.isRaining) o.rain = 1;
     if (bot.experience) o.xp = [bot.experience.level || 0, Math.round((bot.experience.progress || 0) * 100) / 100];
@@ -512,6 +529,61 @@ class Session {
   }
 
   /* The blocks in an 81x81x24 area around the view: a palette of block states and run-lengths. */
+
+  /* Our effects that change movement: levels of speed, slowness, jump boost; slow falling, levitation. */
+  effectsOf() {
+    const e = (this.bot.entity && this.bot.entity.effects) || {}, lv = id => e[id] ? (e[id].amplifier || 0) + 1 : 0;
+    return { s: lv(1), sl: lv(2), j: lv(8), sf: lv(28) ? 1 : 0, lev: lv(25) };
+  }
+  /* The blocks' collision boxes around a box, in world coordinates. */
+  boxesNear(x0, y0, z0, x1, y1, z1) {
+    const out = [], v = new Vec3(0, 0, 0);
+    for (let bx = Math.floor(x0); bx <= Math.floor(x1); bx++) for (let by = Math.floor(y0) - 1; by <= Math.floor(y1); by++) for (let bz = Math.floor(z0); bz <= Math.floor(z1); bz++) {
+      v.x = bx; v.y = by; v.z = bz;
+      let b; try { b = this.bot.blockAt(v); } catch (e) { continue; }
+      if (!b || b.boundingBox !== "block" || !b.shapes) continue;
+      for (const s of b.shapes) out.push([bx + s[0], by + s[1], bz + s[2], bx + s[3], by + s[4], bz + s[5]]);
+    }
+    return out;
+  }
+  nameAt(x, y, z) { try { const b = this.bot.blockAt(new Vec3(Math.floor(x), Math.floor(y), Math.floor(z))); return b ? b.name : ""; } catch (e) { return ""; } }
+  /* Would a Minecraft client make this move? Not through blocks, not faster than running and jumping can take
+     you (more on ice, with speed, after knockback), no climbing into the air or hanging in it. */
+  checkMove(pos, sneak) {
+    const from = this.bot.entity.position, m = this.move || (this.move = { air: 0, rise: 0, hover: 0, kbH: 0, kbY: 0 });
+    const dx = pos[0] - from.x, dy = pos[1] - from.y, dz = pos[2] - from.z, hd = Math.hypot(dx, dz);
+    // The page also repeats its position when only the view turns; a repeat is not a new tick of movement.
+    const now = Date.now();
+    if (dx === 0 && dy === 0 && dz === 0 && now - (m.at || 0) < 45) return { ok: true, ground: this.bot.entity.onGround };
+    m.at = now;
+    const fx = this.effectsOf(), h = sneak ? 1.5 : 1.8, eps = 1e-3;
+    const feet = this.nameAt(pos[0], pos[1] + 0.1, pos[2]), chest = this.nameAt(pos[0], pos[1] + 0.9, pos[2]), under = this.nameAt(pos[0], pos[1] - 0.5, pos[2]);
+    const fluid = /water|lava|bubble_column|kelp|seagrass/.test(feet + chest), climb = /ladder|^vine$|scaffolding|twisting_vines|weeping_vines|cave_vines/.test(feet);
+    const ice = /ice/.test(under) || /ice/.test(this.nameAt(from.x, from.y - 0.5, from.z));
+    const maxH = (ice ? 1.3 : 0.75) * (1 + 0.2 * fx.s) + m.kbH;
+    const maxUp = 0.6 + 0.1 * fx.j + m.kbY + (fx.lev ? 0.5 : 0) + (fluid ? 0.2 : 0);
+    const decay = () => { m.kbH *= 0.91; m.kbY = Math.max(0, m.kbY - 0.08); };
+    if (hd > maxH) { decay(); return { ok: false, why: "hız " + hd.toFixed(2) }; }
+    if (dy > maxUp) { decay(); return { ok: false, why: "yükselme " + dy.toFixed(2) }; }
+    if (dy < -4) { decay(); return { ok: false, why: "düşüş " + dy.toFixed(2) }; }
+    const boxes = this.boxesNear(pos[0] - 0.3, pos[1], pos[2] - 0.3, pos[0] + 0.3, pos[1] + h, pos[2] + 0.3);
+    const overlaps = (q, list) => list.some(b => b[0] < q[0] + 0.3 - eps && b[3] > q[0] - 0.3 + eps && b[2] < q[2] + 0.3 - eps && b[5] > q[2] - 0.3 + eps && b[1] < q[1] + h - eps && b[4] > q[1] + eps);
+    // Put inside a block by the server (a teleport, a block placed on them): as in Minecraft, they may climb back out.
+    const stuck = () => overlaps([from.x, from.y, from.z], this.boxesNear(from.x - 0.3, from.y, from.z - 0.3, from.x + 0.3, from.y + h, from.z + 0.3));
+    if (overlaps(pos, boxes) && !stuck()) { decay(); return { ok: false, why: "blok içinden geçiş" }; }
+    const ground = boxes.some(b => b[0] < pos[0] + 0.3 - eps && b[3] > pos[0] - 0.3 + eps && b[2] < pos[2] + 0.3 - eps && b[5] > pos[2] - 0.3 + eps && b[4] <= pos[1] + eps && b[4] > pos[1] - 0.03);
+    // In the air: a jump rises at most about 1.25 blocks; gravity always pulls (no hovering).
+    if (ground || fluid || climb || fx.lev || fx.sf) { m.air = 0; m.rise = 0; m.hover = 0; }
+    else {
+      m.air++; if (dy > 0) m.rise += dy;
+      m.hover = dy > -eps ? m.hover + 1 : 0;
+      if (dy > 0 && m.rise > 1.3 + 0.55 * fx.j + m.kbY * 3) { decay(); return { ok: false, why: "havada yükselme" }; }
+      if (m.hover > 12 && m.kbY < 0.1) { decay(); return { ok: false, why: "havada asılı kalma" }; }
+    }
+    decay();
+    return { ok: true, ground };
+  }
+
   /* A palette entry: name, shape; for blocks Minecraft draws as models (chests, beds, signs…) their state too. */
   palEntry(sid, name) {
     const s = this.shapeOf(sid), e = s === null ? { n: name.toUpperCase() } : { n: name.toUpperCase(), s };
