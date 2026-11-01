@@ -941,6 +941,8 @@
   const horse = tex => ({ tex, tw: 64, th: 64, h: 1.6, parts: [
     { n: "body", at: [0, 11, 5], b: [[0, 32, -5, -8, -17, 10, 10, 22, 0.05]] },
     { n: "saddle", parent: "body", opt: "saddle", at: [0, 0, 0], b: [[26, 0, -5, -8, -9, 10, 9, 9, 0.5]] },
+    { n: "lchest", parent: "body", opt: "chest", at: [6, -8, 0], rot: [0, -P2, 0], b: [[26, 21, -4, 0, -2, 8, 8, 3]] },
+    { n: "rchest", parent: "body", opt: "chest", at: [-6, -8, 0], rot: [0, P2, 0], b: [[26, 21, -4, 0, -2, 8, 8, 3, 0, 1]] },
     { n: "head", at: [0, 4, -12], rot: [0.5236, 0, 0], b: [[0, 35, -2.05, -6, -2, 4, 12, 7], [0, 13, -3, -11, -2, 6, 5, 7], [56, 36, -1, -11, 5.01, 2, 16, 2], [0, 25, -2, -11, -7, 4, 5, 5], [19, 16, 0.55, -13, 4, 2, 3, 1], [19, 16, -2.55, -13, 4, 2, 3, 1, 0, 1]] },
     { n: "tail", at: [0, 4, 11], rot: [0.5236, 0, 0], b: [[42, 36, -1.5, 0, 0, 3, 14, 4]] },
     { n: "rh", at: [-4, 14, 7], b: [[48, 21, -1, -1.01, -1, 4, 11, 4]] }, { n: "lh", at: [4, 14, 7], b: [[48, 21, -3, -1.01, -1, 4, 11, 4, 0, 1]] },
@@ -973,6 +975,8 @@
   const llama = tex => ({ tex, tw: 128, th: 64, h: 1.87, parts: [
     { n: "head", at: [0, 7, -6], b: [[0, 0, -2, -14, -10, 4, 4, 9], [0, 14, -4, -16, -6, 8, 18, 6], [17, 0, -4, -19, -4, 3, 3, 2], [17, 0, 1, -19, -4, 3, 3, 2]] },
     { n: "body", at: [0, 5, 2], rot: [P2, 0, 0], b: [[29, 0, -6, -10, -7, 12, 18, 10]] },
+    { n: "rchest", opt: "chest", at: [-8.5, 3, 3], rot: [0, P2, 0], b: [[45, 28, -3, 0, 0, 8, 8, 3]] },
+    { n: "lchest", opt: "chest", at: [5.5, 3, 3], rot: [0, P2, 0], b: [[45, 41, -3, 0, 0, 8, 8, 3]] },
     ...Q4(29, 29, [-2, 0, -2, 4, 14, 4], [[-3.5, 10, 6], [3.5, 10, 6], [-3.5, 10, -5], [3.5, 10, -5]])], legs: QUAD_LEGS });
   const squid = tex => {
     const parts = [{ n: "body", at: [0, 8, 0], b: [[0, 0, -6, -8, -6, 12, 16, 12]] }];
@@ -1028,6 +1032,7 @@
     ocelot: cat("entity/cat/ocelot"),
     camel: { tex: "entity/camel/camel", tw: 128, th: 128, h: 2.375, parts: [
       { n: "body", at: [0, 4, 9.5], b: [[0, 25, -7.5, -12, -23.5, 15, 12, 27], [74, 0, -4.5, -17, -15.5, 9, 5, 11]] },
+      { n: "saddle", parent: "body", opt: "saddle", at: [0, 0, 0], b: [[74, 64, -4.5, -17, -15.5, 9, 5, 11, 0.05], [92, 114, -3.5, -20, -15.5, 7, 3, 11], [0, 89, -7.5, -12, -23.5, 15, 12, 27, 0.1]] },
       { n: "tail", parent: "body", at: [0, -9, 3.5], b: [[122, 0, -1.5, 0, 0, 3, 14, 0]] },
       { n: "head", at: [0, -3, -19.5], b: [[60, 24, -3.5, -7, -15, 7, 8, 19], [21, 0, -3.5, -21, -15, 7, 14, 7], [50, 0, -2.5, -21, -21, 5, 5, 6]] },
       { n: "lear", parent: "head", at: [3.5, -20, -10.5], b: [[45, 0, -0.5, 0.5, -1, 3, 1, 2]] },
@@ -1309,11 +1314,16 @@
       case "creeper": if (md.is_powered) L.charged = true; break;
     }
     if (n === "horse" || n === "donkey" || n === "mule" || n === "skeleton_horse" || n === "zombie_horse" || n === "camel") { if (md.flags & 4) L.saddle = true; }
+    if (md.chest) L.chest = true;
+    if (n === "snow_golem") L.pumpkin = ((md.pumpkin ?? 16) & 16) !== 0;
+    // Horse armour: worn in the body slot; Minecraft draws it over the horse, a little larger.
+    const body = p.ar && p.ar[1] ? p.ar[1].split("#") : null, hm = body && body[0].match(/^(leather|iron|golden|diamond)_horse_armor$/);
+    if (hm && n === "horse") L.overlay = { key: "entity/horse/armor/horse_armor_" + (hm[1] === "golden" ? "gold" : hm[1]), tint: hm[1] === "leather" ? (body[1] ? +body[1] : 0xA06540) : null, inflate: 0.1 };
     return L;
   }
   /* A mob's look as one key, so it is rebuilt only when that changes. */
   function lookKey(p) {
-    const md = p.md || {}, k = { ...md }; delete k.health; delete k.remaining_anger_time; delete k.flags;
+    const md = p.md || {}, k = { ...md, ha: p.ar && p.ar[1] && /horse_armor/.test(p.ar[1]) ? p.ar[1] : 0 }; delete k.health; delete k.remaining_anger_time; delete k.flags;
     if (p.name === "iron_golem") k.c = Math.floor((md.health ?? 100) / 25);
     if (p.name === "bee") k.b = (md.flags & 8) + (md.remaining_anger_time > 0 ? 1 : 0);
     if (/horse|donkey|mule|camel/.test(p.name)) k.s = md.flags & 4;
@@ -1377,6 +1387,8 @@
   function buildMob(def, p) {
     const col = mobColour(p.name), look = looksOf(p, def), mats = [layeredMat(look.layers, col, def.translucent)];
     if (def.tex2) { const fur = layeredMat([{ key: def.tex2, tint: look.fur }], 0xffffff); fur.visible = !look.noFur; mats.push(fur); }
+    const overlayMat = look.overlay ? layeredMat([{ key: look.overlay.key, tint: look.overlay.tint }], 0xffffff) : null;
+    if (overlayMat) mats.push(overlayMat);
     const root = new THREE.Group(), model = new THREE.Group(); root.add(model);
     // Grown-ups by their height, babies smaller, slimes by their size.
     let k = def.size === "w" ? Math.max(0.2, p.w) / 0.52 : Math.max(0.3, Math.min(1.6, (p.h || def.h) / def.h)) * (def.scale || 1);
@@ -1391,11 +1403,13 @@
       if (part.opt && !look[part.opt]) continue;
       const g = new THREE.Group(); g.position.set(part.at[0] * PX, -part.at[1] * PX, -part.at[2] * PX);
       if (part.rot) { g.rotation.order = "ZYX"; g.rotation.set(part.rot[0], -part.rot[1], -part.rot[2]); }
-      for (const b of part.b || []) {
+      const boxes = (part.b || []).slice();
+      if (look.overlay && !part.opt) for (const b of part.b || []) { const c = b.slice(); while (c.length < 11) c.push(0); c[8] = (c[8] || 0) + look.overlay.inflate; c[10] = 9; boxes.push(c); }
+      for (const b of boxes) {
         const [u, v, x0, y0, z0, w, h, d, inf = 0, mir = 0, mi = 0] = b;
         const geo = new THREE.BoxGeometry(Math.max(0.02, w + 2 * inf) * PX, Math.max(0.02, h + 2 * inf) * PX, Math.max(0.02, d + 2 * inf) * PX);
         boxUV(geo, u, v, w, h, d, def.tw, def.th, !!mir);
-        const m = new THREE.Mesh(geo, mats[mi] || mats[0]); m.position.set((x0 + w / 2) * PX, -(y0 + h / 2) * PX, -(z0 + d / 2) * PX);
+        const m = new THREE.Mesh(geo, mi === 9 ? overlayMat : (mats[mi] || mats[0])); m.position.set((x0 + w / 2) * PX, -(y0 + h / 2) * PX, -(z0 + d / 2) * PX);
         g.add(m);
       }
       (part.parent && parts[part.parent] ? parts[part.parent] : inner).add(g); parts[part.n] = g;
@@ -1405,8 +1419,16 @@
     const legs = def.legs.map(([n]) => parts[n]).filter(Boolean), signs = def.legs.map(([, sg]) => sg);
     const head = parts.head || new THREE.Group();
     if (baby && def.legs === QUAD_LEGS) head.scale.setScalar(1.5);
-    // Camels: a saddle pad on the back.
-    if (look.saddle && parts.body && /camel/.test(p.name)) { const sad = new THREE.Mesh(new THREE.BoxGeometry(10.2 * PX, 2 * PX, 9 * PX), new THREE.MeshBasicMaterial({ color: 0x5a3a22 })); sad.position.set(0, (/camel/.test(p.name) ? 13.5 : 1) * PX, (/camel/.test(p.name) ? 4 : 5) * PX); parts.body.add(sad); }
+    // A snow golem's carved pumpkin: the block, a little smaller than the head.
+    if (look.pumpkin && parts.head) {
+      const cube = new THREE.Group(); cube.position.set(0, 4 * PX, 0); cube.scale.setScalar(10 / 16); parts.head.add(cube);
+      (async () => {
+        const side = await faceCanvas("PUMPKIN", "side"), top = await faceCanvas("PUMPKIN", "top"), front = await faceCanvas("CARVED_PUMPKIN", "front") || await faceCanvas("CARVED_PUMPKIN", "side");
+        if (!side) return;
+        const m = c => new THREE.MeshBasicMaterial({ map: nearestTex(c || side) });
+        cube.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [m(side), m(side), m(top), m(top), m(front), m(side)]));
+      })();
+    }
     if (look.charged) mats.forEach(m => { m.color.setRGB(0.7, 0.85, 1.3); });
     // Armour and held items for the ones shaped like people.
     const slots = parts.ra && parts.rl ? { head: [parts.head, 0, 4, 0], body: [parts.body, 0, -6, 0], ra: [parts.ra, -1, -4, 0], la: [parts.la, 1, -4, 0], rl: [parts.rl, 0, -6, 0], ll: [parts.ll, 0, -6, 0] } : null;
@@ -1441,7 +1463,17 @@
   function makeThing(p) {
     const root = new THREE.Group(), md = p.md || {};
     let body = new THREE.Group(); root.add(body);
+    let tilt = null;
     if (p.name === "tnt") { const m = itemMesh("tnt", "drop"); m.scale.setScalar(4); m.position.y = 0.5; body.add(m); }
+    else if (p.name === "falling_block" && md.block) { const m = itemMesh(md.block, "drop"); m.scale.setScalar(4); m.position.y = 0.5; body.add(m); }
+    else if (/item_frame$/.test(p.name)) {
+      // The frame board (block texture) and the item in it, turned in 45° steps as Minecraft keeps it.
+      tilt = new THREE.Group(); tilt.position.y = 0.25; body.add(tilt);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x9a7a55 }), board = new THREE.Mesh(new THREE.BoxGeometry(12 * PX, 12 * PX, PX), mat); board.position.z = -0.5 * PX; tilt.add(board);
+      faceCanvas(p.name.toUpperCase(), "side").then(c => { if (!c) return; mat.map = nearestTex(c); mat.color.setScalar(p.name.startsWith("glow") ? 1 : worldLight); mat.needsUpdate = true; });
+      if (md.item) { const it = itemMesh(md.item, "drop"); it.scale.setScalar(1.4); it.position.z = 0.6 * PX; it.rotation.z = -(md.rotation || 0) * Math.PI / 4; tilt.add(it); }
+      root.mats = [mat];
+    }
     else if (THROWN[p.name]) { const m = itemMesh(THROWN[p.name], "drop"); m.scale.setScalar(1.4); m.position.y = 0.15; body.add(m); }
     else if (p.name === "experience_orb") {
       const mat = new THREE.SpriteMaterial({ color: 0xc8ff50, transparent: true });
@@ -1455,7 +1487,7 @@
       root.mats = [mat];
     } else return null;
     scene.add(root);
-    return { root, body, head: new THREE.Group(), legs: [], phase: 0, x: p.x, z: p.z, mob: true, mats: root.mats || [], flaps: [], spins: [], look: lookKey(p) };
+    return { root, body, head: new THREE.Group(), legs: [], phase: 0, x: p.x, z: p.z, mob: true, mats: root.mats || [], flaps: [], spins: [], look: lookKey(p), tilt, still: /item_frame|painting/.test(p.name) };
   }
   function makeMob(p) {
     const thing = makeThing(p); if (thing) return thing;
@@ -1505,8 +1537,21 @@
     const limb = (u, v, x, y) => { const g = new THREE.Group(); g.position.set(x * PX, y * PX, 0); const m = part(mat, u, v, 4, 12, 4, 0); m.position.y = -6 * PX; g.add(m); body.add(g); return g; };
     const armR = limb(40, 16, -6, 24), armL = limb(32, 48, 6, 24), legR = limb(0, 16, -2, 12), legL = limb(16, 48, 2, 12);
     if (p.name) root.add(nameTag(p.name, p.team));
+    // The player's cape (from their Mojang profile, when they have one), hanging from the shoulders.
+    let cape = null;
+    if (p.skin && /^[A-Za-z0-9_]{1,16}$/.test(p.skin)) {
+      cape = new THREE.Group(); cape.position.set(0, 24 * PX, -2 * PX); body.add(cape);
+      const img = new Image();
+      img.onload = () => {
+        const W = Math.max(64, img.width), c = document.createElement("canvas"); c.width = W; c.height = W / 2; c.getContext("2d").drawImage(img, 0, 0);
+        const geo = new THREE.BoxGeometry(10 * PX, 16 * PX, PX); boxUV(geo, 0, 0, 10, 16, 1, 64, 32);
+        const cm = new THREE.MeshBasicMaterial({ map: nearestTex(c), transparent: true, alphaTest: 0.5 });
+        const m = new THREE.Mesh(geo, cm); m.position.set(0, -8 * PX, -0.5 * PX); m.rotation.y = Math.PI; cape.add(m);
+      };
+      img.src = "/cape/" + encodeURIComponent(p.skin);
+    }
     scene.add(root);
-    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat], slots: { head: [head, 0, 4, 0], body: [body, 0, 18, 0], ra: [armR, 0, -6, 0], la: [armL, 0, -6, 0], rl: [legR, 0, -6, 0], ll: [legL, 0, -6, 0] } };
+    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat], cape, slots: { head: [head, 0, 4, 0], body: [body, 0, 18, 0], ra: [armR, 0, -6, 0], la: [armL, 0, -6, 0], rl: [legR, 0, -6, 0], ll: [legL, 0, -6, 0] } };
   }
   const avatars = new Map();
   // ---------- items in hands and on the ground, the first-person hand, swings (as Minecraft draws them) ----------
@@ -1519,6 +1564,17 @@
     (async () => {
       const alias = ITEM_ALIAS[name] || name, N = name.toUpperCase();
       let flat = null;
+      // A shield has no item picture in Minecraft: its face comes from the shield texture.
+      if (name === "shield") {
+        const sh = userPack && userPack.get("entity/shield_base_nopattern") ? await loadImg("entity/shield_base_nopattern") : null;
+        const k = sh ? sh.width / 64 : 1, c = document.createElement("canvas"); c.width = 12; c.height = 22; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+        if (sh) g.drawImage(sh, k, k, 12 * k, 22 * k, 0, 0, 12, 22); else { g.fillStyle = "#7a5a32"; g.fillRect(0, 0, 12, 22); }
+        const pl = new THREE.Mesh(new THREE.PlaneGeometry(12 / 16, 22 / 16), new THREE.MeshBasicMaterial({ map: nearestTex(c), side: THREE.DoubleSide }));
+        if (kind === "fp") { pl.position.set(-0.1, 0.1, 0); pl.rotation.set(0, Math.PI / 2, 0); pl.scale.setScalar(0.6); }
+        else if (kind === "tp") { pl.position.set(0, -0.05, -0.12); pl.rotation.set(-Math.PI / 2 + 0.2, 0, 0); pl.rotation.order = "YXZ"; pl.rotation.y = Math.PI / 2; pl.scale.setScalar(0.55); }
+        else pl.scale.setScalar(0.35);
+        grp.add(pl); return;
+      }
       const img = await loadImg("item/" + alias);
       if (img) { flat = document.createElement("canvas"); flat.width = flat.height = 16; const g = flat.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, img.width, img.width, 0, 0, 16, 16); }
       else { const side = await faceCanvas(N, "side"); if (!side) return; if (FLAT_BLOCK(N)) flat = side; else {
@@ -2286,7 +2342,7 @@
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
     const prev = new Map(a.d.p.map(q => [q[0], q]));
-    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", md: q[14] || 0, ar: q[15] || 0, keeper: String(q[0]).startsWith("a") }; });
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", md: q[14] || 0, ar: q[15] || 0, off: q[16] || "", keeper: String(q[0]).startsWith("a") }; });
     const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
     return { people, ball, latest: b.d };
   }
@@ -2350,8 +2406,13 @@
         }
         if (isMe) fpSetSkin(p.skin, p.team);
         if (a.slots) wearArmour(a, p.ar);
+        // The other hand: shields, torches, maps… in the left hand, as worn.
+        const leftHand = a.armL || (a.slots && a.slots.la && a.slots.la[0]);
+        if (leftHand && a.offName !== p.off) { if (a.offMesh) leftHand.remove(a.offMesh); a.offName = p.off; a.offMesh = p.off ? itemMesh(p.off, "tp") : null; if (a.offMesh) { a.offMesh.position.set(a.armL ? 0 : PX, (a.armL ? -10 : -9) * PX, 0); leftHand.add(a.offMesh); } }
+        if (a.cape) a.cape.rotation.x = 0.1 + (a.walkSpeed || 0) * 0.9 + (sneak ? 0.3 : 0);
         if (a.mob && a.handPart && a.held !== p.held) { if (a.heldMesh) a.handPart.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.set(-1 * PX, -9 * PX, 0); a.handPart.add(a.heldMesh); } }
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
+        if (a.tilt) a.tilt.rotation.x = pitch * Math.PI / 180;
         if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
         if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -walk; a.armL.rotation.x = walk;

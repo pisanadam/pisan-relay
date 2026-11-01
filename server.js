@@ -50,11 +50,17 @@ async function skinPng(name) {
     const id = await getJson("https://api.mojang.com/users/profiles/minecraft/" + encodeURIComponent(name));
     const profile = id && await getJson("https://sessionserver.mojang.com/session/minecraft/profile/" + id.id);
     const tex = profile && profile.properties && profile.properties.find(p => p.name === "textures");
-    if (tex) { const url = JSON.parse(Buffer.from(tex.value, "base64").toString()).textures?.SKIN?.url; if (url) png = await getBuffer(url.replace("http://", "https://")); }
+    if (tex) {
+      const t = JSON.parse(Buffer.from(tex.value, "base64").toString()).textures || {};
+      if (t.SKIN && t.SKIN.url) png = await getBuffer(t.SKIN.url.replace("http://", "https://"));
+      capes.set(k, t.CAPE && t.CAPE.url ? await getBuffer(t.CAPE.url.replace("http://", "https://")) : null);
+    }
   }
   skins.set(k, png);
   return png;
 }
+const capes = new Map();
+async function capePng(name) { const k = name.toLowerCase(); if (!skins.has(k)) await skinPng(name); return capes.get(k) || null; }
 /* pack.zip may be a whole Minecraft client .jar (23 MB): players get only what the game draws (block, item and
    GUI textures), copied entry by entry, still compressed, into pack-web.zip. */
 function slimPack() {
@@ -137,6 +143,8 @@ const server = http.createServer(async (req, res) => {
   if (url === "/sounds.json") { const b = await asset("minecraft/sounds.json"); return b ? send(200, "application/json", b, "max-age=86400") : send(404, "text/plain", "404"); }
   m = url.match(/^\/snd\/([a-z0-9_\/.-]{1,120})\.ogg$/);
   if (m && !m[1].includes("..")) { const b = await asset("minecraft/sounds/" + m[1] + ".ogg"); return b ? send(200, "audio/ogg", b, "max-age=604800") : send(404, "text/plain", "404"); }
+  m = url.match(/^\/cape\/([A-Za-z0-9_]{1,16})$/);
+  if (m) { const png = await capePng(m[1]); return png ? send(200, "image/png", png, "max-age=600") : send(404, "text/plain", "404"); }
   m = url.match(/^\/skin\/(@ball|[A-Za-z0-9_]{1,16})$/);
   if (m) { const png = await skinPng(m[1]); return png ? send(200, "image/png", png, "max-age=600") : send(404, "text/plain", "404"); }
   send(404, "text/plain", "404");
@@ -241,7 +249,9 @@ class Session {
       bot.on("entityHurt", e => this.anims.push([this.idOf(e), "h"]));
       // Paintings say which way they face in the spawn data (2 north, 3 south, 4 west, 5 east).
       this.faces = new Map();
-      bot._client.on("spawn_entity", p => { if (p.objectData >= 2 && p.objectData <= 5) this.faces.set(p.entityId, { 2: 180, 3: 0, 4: 90, 5: -90 }[p.objectData]); });
+      this.spawnData = new Map();
+      bot._client.on("spawn_entity", p => { this.spawnData.set(p.entityId, p.objectData); if (p.objectData >= 2 && p.objectData <= 5) this.faces.set(p.entityId, { 2: 180, 3: 0, 4: 90, 5: -90 }[p.objectData]); });
+      bot.on("entityGone", e => { this.spawnData.delete(e.id); this.faces.delete(e.id); });
       // Sounds: by name, or by number in the sound registry (minecraft-data counts from 1, the packet from 0).
       const soundOf = p => p.sound ? (p.sound.data ? p.sound.data.soundName : (bot.registry.sounds[p.sound.soundId + 1] || {}).name) : (bot.registry.sounds[p.soundId + 1] || {}).name;
       bot._client.on("sound_effect", p => { const n = soundOf(p); if (n) this.send({ t: "snd", n: n.replace(/^minecraft:/, ""), x: p.x / 8, y: p.y / 8, z: p.z / 8, v: +p.volume.toFixed(2), p: +p.pitch.toFixed(2) }); });
@@ -417,7 +427,7 @@ class Session {
         const info = Object.values(bot.players).find(p => p.uuid === e.uuid);
         const name = isMe ? this.name : (e.username || (info && info.username) || "");
         if (info && info.gamemode === 3 && !isMe) continue;
-        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, name.startsWith("(mobil)") ? "" : name, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem), 0, armourOf(e)]);
+        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, name.startsWith("(mobil)") ? "" : name, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem), 0, armourOf(e), offhandOf(isMe ? { equipment: [0, bot.inventory.slots[45]] } : e)]);
       } else if (e.name === "armor_stand") {
         if (invisible(e)) continue;
         people.push(["a" + e.id.toString(16), customName(e), -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), 0, 0, "", "a"]);
@@ -426,7 +436,10 @@ class Session {
         people.push(["i" + e.id.toString(16), item ? item.name : "stone", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), 0, 0, 0, "", "i"]);
       } else if (["mob", "hostile", "animal", "passive", "water_creature", "ambient", "projectile", "orb"].includes(e.type) || (e.type === "other" && e.height > 0.2 && !/display|marker|interaction|area_effect/.test(e.name || ""))) {
         if (invisible(e)) continue;
-        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), e.name === "painting" && this.faces.has(e.id) ? this.faces.get(e.id) : Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8), heldName(e.heldItem), looksOf(bot, e), armourOf(e)]);
+        const sd = this.spawnData.get(e.id), framed = /item_frame/.test(e.name);
+        let looks = looksOf(bot, e);
+        if (e.name === "falling_block" && sd != null) { const b = bot.registry.blocksByStateId[sd]; if (b) looks = Object.assign(looks || {}, { block: b.name }); }
+        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), (e.name === "painting" || framed) && this.faces.has(e.id) ? this.faces.get(e.id) : Math.round(fromYaw(e.yaw)), framed && (sd === 0 || sd === 1) ? (sd === 1 ? -90 : 90) : Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8), heldName(e.heldItem), looks, armourOf(e), offhandOf(e)]);
       }
     }
     const x = this.extras;
@@ -517,8 +530,9 @@ class Session {
 }
 
 function heldName(item) { return item && item.name ? item.name : ""; }
+function offhandOf(e) { const it = (e.equipment || [])[1]; return it && it.name ? it.name : ""; }
 /* What a mob looks like beyond its kind (wool colour, horse coat, villager job, baby…), by metadata name. */
-const LOOKS = ["baby", "wool", "flags", "type_variant", "variant", "collar_color", "type", "main_gene", "hidden_gene", "color", "villager_data", "saddle", "swag", "chest", "pumpkin", "is_powered", "suffocating", "remaining_anger_time", "health", "special_type", "owneruuid", "painting_variant"];
+const LOOKS = ["baby", "wool", "flags", "type_variant", "variant", "collar_color", "type", "main_gene", "hidden_gene", "color", "villager_data", "saddle", "swag", "chest", "pumpkin", "is_powered", "suffocating", "remaining_anger_time", "health", "special_type", "owneruuid", "painting_variant", "item", "rotation"];
 function looksOf(bot, e) {
   const def = bot.registry.entitiesByName[e.name]; if (!def || !def.metadataKeys || !e.metadata) return 0;
   const out = {}; let any = false;
@@ -528,6 +542,7 @@ function looksOf(bot, e) {
     if (typeof v === "bigint") v = Number(v);
     if (k === "owneruuid") { out.tame = 1; any = true; continue; }
     if (k === "health") v = Math.round(v);
+    if (k === "item") { const it = v && (v.itemId !== undefined ? bot.registry.items[v.itemId] : v.name ? v : null); if (it && it.name) { out.item = it.name; any = true; } continue; }
     if (typeof v === "object") { if (k !== "villager_data") continue; v = [v.villagerType ?? v.type ?? 0, v.villagerProfession ?? v.profession ?? 0, v.level ?? 1]; }
     out[k] = v; any = true;
   }
