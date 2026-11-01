@@ -58,7 +58,7 @@ async function skinPng(name) {
 /* pack.zip may be a whole Minecraft client .jar (23 MB): players get only what the game draws (block, item and
    GUI textures), copied entry by entry, still compressed, into pack-web.zip. */
 function slimPack() {
-  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web.zip");
+  const src = path.join(__dirname, "pack.zip"), out = path.join(__dirname, "pack-web2.zip");
   let st; try { st = fs.statSync(src); } catch (e) { return null; }
   try { if (fs.statSync(out).mtimeMs >= st.mtimeMs) return out; } catch (e) { }
   try {
@@ -77,7 +77,7 @@ function slimPack() {
       const lo = b.readUInt32LE(p + 42), csize = b.readUInt32LE(p + 20);
       const central = b.subarray(p, p + 46 + nameLen + extraLen + commentLen);
       p += 46 + nameLen + extraLen + commentLen;
-      if (!/^assets\/minecraft\/textures\/(block|item|gui)\/[a-z0-9_\/]+\.png$/.test(name)) continue;
+      if (!/^assets\/minecraft\/(textures\/(block|item|gui|font|environment)\/[a-z0-9_\/]+\.png(\.mcmeta)?|font\/[a-z0-9_\/]+\.json)$/.test(name)) continue;
       const lNameLen = b.readUInt16LE(lo + 26), lExtraLen = b.readUInt16LE(lo + 28);
       const local = Buffer.from(b.subarray(lo, lo + 30 + lNameLen + lExtraLen + csize));
       local.writeUInt16LE(local.readUInt16LE(6) & ~8, 6); // sizes are in the header; no data descriptor follows
@@ -85,6 +85,7 @@ function slimPack() {
       locals.push(local); centrals.push(c); offset += local.length;
     }
     if (!locals.length) throw new Error("pakette doku yok");
+    try { fs.unlinkSync(path.join(__dirname, "pack-web.zip")); } catch (e) { }
     const cd = Buffer.concat(centrals), end = Buffer.alloc(22);
     end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(locals.length, 8); end.writeUInt16LE(locals.length, 10);
     end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
@@ -206,6 +207,10 @@ class Session {
         if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
       });
       bot.on("respawn", () => { this.regionAt = null; });
+      // Arm swings and hits on others, shown on their models as in Minecraft.
+      this.anims = [];
+      bot.on("entitySwingArm", e => { if (e !== bot.entity) this.anims.push([this.idOf(e), "s"]); });
+      bot.on("entityHurt", e => this.anims.push([this.idOf(e), "h"]));
     });
     bot._client.on("custom_payload", p => {
       if (p.channel !== "pisan:web") return;
@@ -329,6 +334,12 @@ class Session {
     }
   }
 
+  idOf(e) {
+    if (e === this.bot.entity) return this.meId;
+    if (e.type === "player") return (e.uuid || "").slice(0, 8);
+    return (e.name === "armor_stand" ? "a" : e.name === "item" ? "i" : "m") + e.id.toString(16);
+  }
+
   /* 20 times a second: everyone nearby, the ball, our own position, health; the blocks when they change. */
   tick() {
     const bot = this.bot;
@@ -359,7 +370,7 @@ class Session {
         const info = Object.values(bot.players).find(p => p.uuid === e.uuid);
         const name = isMe ? this.name : (e.username || (info && info.username) || "");
         if (info && info.gamemode === 3 && !isMe) continue;
-        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, name.startsWith("(mobil)") ? "" : name, "p"]);
+        people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, name.startsWith("(mobil)") ? "" : name, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem)]);
       } else if (e.name === "armor_stand") {
         if (invisible(e)) continue;
         people.push(["a" + e.id.toString(16), customName(e), -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), 0, 0, "", "a"]);
@@ -368,7 +379,7 @@ class Session {
         people.push(["i" + e.id.toString(16), item ? item.name : "stone", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), 0, 0, 0, "", "i"]);
       } else if (["mob", "hostile", "animal", "passive", "water_creature", "ambient"].includes(e.type) || (e.type === "other" && e.height > 0.2 && !/display|marker|interaction|area_effect/.test(e.name || ""))) {
         if (invisible(e)) continue;
-        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8)]);
+        people.push(["m" + e.id.toString(16), e.name || "mob", -1, r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), 0, customName(e), "m", r2(e.width || 0.6), r2(e.height || 1.8), heldName(e.heldItem)]);
       }
     }
     const x = this.extras;
@@ -377,6 +388,8 @@ class Session {
     if (this.tpSent !== this.tpSeq) { this.tpSent = this.tpSeq; o.yaw = Math.round(fromYaw(bot.entity.yaw) * 10) / 10; o.pitch = Math.round(fromPitch(bot.entity.pitch) * 10) / 10; }
     if (x.b) { o.b = x.b; o.r = x.r; o.bl = x.bl; o.c = x.c; o.ph = x.ph; o.pause = x.pause; }
     if (camera) o.cam = camera;
+    if (bot.experience) o.xp = [bot.experience.level || 0, Math.round((bot.experience.progress || 0) * 100) / 100];
+    if (this.anims && this.anims.length) { o.an = this.anims; this.anims = []; }
     this.send(o);
     this.hotbar();
   }
@@ -454,6 +467,7 @@ class Session {
   }
 }
 
+function heldName(item) { return item && item.name ? item.name : ""; }
 function sneaking(e) { const m = e.metadata || []; return m[6] === 5 || m[6] === "crouching"; }
 function invisible(e) { const m = e.metadata || []; return typeof m[0] === "number" && (m[0] & 0x20) !== 0; }
 function customName(e) {

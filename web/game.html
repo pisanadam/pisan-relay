@@ -37,7 +37,7 @@
   h2 { font-size:15px; color:#ffe36a; text-align:left; margin:16px 0 4px; }
   input[type=range] { width:100%; }
 
-  #game canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #game canvas#cv { position:absolute; inset:0; width:100%; height:100%; display:block; }
   #cross { position:absolute; left:50%; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px; pointer-events:none; }
   #cross::before, #cross::after { content:""; position:absolute; background:rgba(255,255,255,.85); }
   #cross::before { left:8px; top:0; width:2px; height:18px; } #cross::after { top:8px; left:0; width:18px; height:2px; }
@@ -68,6 +68,16 @@
   .icon { width:30px; height:30px; image-rendering:pixelated; }
   .glow { filter:drop-shadow(0 0 3px #c58cff) drop-shadow(0 0 2px #c58cff); }
   .count { position:absolute; right:2px; bottom:0; font-size:12px; }
+  #status { position:absolute; left:50%; transform:translateX(-50%); image-rendering:pixelated; pointer-events:none; z-index:3; display:none; }
+  body.packhud #status { display:block; } body.packhud #stats, body.packhud #xp { display:none !important; }
+  body.packhud #cross::before, body.packhud #cross::after { display:none; }
+  #cross canvas { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); image-rendering:pixelated; mix-blend-mode:difference; }
+  #boss .bar.packbar { width:364px; height:10px; background:none; border:0; }
+  #boss .bar.packbar canvas { display:block; width:100%; height:100%; image-rendering:pixelated; }
+  canvas.mct { image-rendering:pixelated; }
+  body.packbtn .mcbtn, body.packbtn #top .tb { background:none; border-style:solid; border-width:6px; border-image:var(--mcbtn) 3 fill / 6px stretch; box-shadow:none; image-rendering:pixelated; }
+  body.packbtn .mcbtn:active, body.packbtn .mcbtn.sel, body.packbtn #top .tb.down, body.packbtn #top .tb:active { border-image-source:var(--mcbtn-on); background:none; }
+  body.packdirt .dirt { background-image:linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55)), var(--dirt) !important; background-size:auto, 64px 64px !important; image-rendering:pixelated; }
   #stats { position:absolute; bottom:70px; left:50%; transform:translateX(-50%); width:400px; max-width:90vw; display:flex; justify-content:space-between; pointer-events:none; font-size:15px; }
   #xp { position:absolute; bottom:56px; left:50%; width:360px; max-width:80vw; transform:translateX(-50%); height:7px; background:#000; border:1px solid #222; pointer-events:none; }
   #xp i { display:block; height:100%; width:0; background:#80ff20; }
@@ -138,6 +148,7 @@
   <div id="subtitle"></div>
   <div id="actionbar"></div>
   <div id="xp"><i></i></div>
+  <canvas id="status"></canvas>
   <div id="stats"></div>
   <div id="hotbar"></div>
   <div id="look"></div>
@@ -181,6 +192,109 @@
   }
   const span = (t, c, b) => t ? "<span style='color:" + c + (b ? ";font-weight:bold" : "") + "'>" + esc(t) + "</span>" : "";
   const plain = text => String(text).replace(/§./g, "");
+  // ---------- the pack's own font (font/*.json + textures/font/*.png), drawn glyph by glyph ----------
+  let mcFont = null;
+  async function loadFont() {
+    mcFont = null;
+    if (!userPack || !userPack.get("fontjson/default")) return;
+    const glyphs = new Map(), seen = new Set();
+    const readJson = async id => {
+      const key = "fontjson/" + String(id).replace(/^minecraft:/, "");
+      if (seen.has(key)) return; seen.add(key);
+      const b = userPack.get(key); if (!b) return;
+      let j; try { j = JSON.parse(await b.text()); } catch (e) { return; }
+      for (const pr of j.providers || []) await provider(pr);
+    };
+    const provider = async pr => {
+      if (pr.type === "reference") return readJson(pr.id);
+      if (pr.type === "space") { for (const [ch, adv] of Object.entries(pr.advances || {})) if (!glyphs.has(ch)) glyphs.set(ch, { adv }); return; }
+      if (pr.type !== "bitmap" || !pr.chars) return;
+      const key = String(pr.file).replace(/^minecraft:/, "").replace(/\.png$/, "");
+      if (!userPack.get(key)) return;
+      const img = await loadImg(key); if (!img) return;
+      const rows = pr.chars.map(r => Array.from(r)), cols = Math.max(...rows.map(r => r.length));
+      const cw = img.width / cols, chh = img.height / rows.length, height = pr.height ?? 8, ascent = pr.ascent ?? 7, scale = height / chh;
+      const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
+      const g = c.getContext("2d"); g.drawImage(img, 0, 0); const px = g.getImageData(0, 0, img.width, img.height).data;
+      rows.forEach((row, r) => row.forEach((ch, k) => {
+        if (ch === "\u0000" || glyphs.has(ch)) return;
+        let w = 0;
+        for (let x = cw - 1; x >= 0 && !w; x--) for (let y = 0; y < chh; y++) if (px[((r * chh + y) * img.width + k * cw + x) * 4 + 3] > 0) { w = x + 1; break; }
+        if (!w) return;
+        glyphs.set(ch, { img, sx: k * cw, sy: r * chh, sw: cw, sh: chh, scale, ascent, height, adv: Math.floor(0.5 + w * scale) + 1 });
+      }));
+    };
+    await readJson("default");
+    if (glyphs.size > 60) mcFont = glyphs;
+  }
+  const FALLBACK = document.createElement("canvas").getContext("2d");
+  function glyphAdv(ch, bold) {
+    const gl = mcFont.get(ch);
+    if (gl) return gl.adv + (bold && gl.img ? 1 : 0);
+    FALLBACK.font = (bold ? "bold " : "") + "8px sans-serif"; return Math.ceil(FALLBACK.measureText(ch).width) + 1;
+  }
+  const textWidth = (t, bold) => { let w = 0; for (const ch of t) w += glyphAdv(ch, bold); return w; };
+  /* One run of text in one colour at font pixels (x, y = top of the line), with Minecraft's shadow. */
+  function drawRun(g, t, x, y, colour, bold, shadow) {
+    const w = textWidth(t, bold) + 2, run = document.createElement("canvas"); run.width = Math.max(1, w); run.height = 16;
+    const rg = run.getContext("2d"); rg.imageSmoothingEnabled = false;
+    let cx = 0;
+    for (const ch of t) {
+      const gl = mcFont.get(ch);
+      if (gl && gl.img) {
+        const top = 4 + 7 - gl.ascent;
+        for (let b = 0; b <= (bold ? 1 : 0); b++) rg.drawImage(gl.img, gl.sx, gl.sy, gl.sw, gl.sh, cx + b, top, gl.sw * gl.scale, gl.height);
+      } else if (!gl) { rg.font = (bold ? "bold " : "") + "8px sans-serif"; rg.fillStyle = "#fff"; rg.fillText(ch, cx, 11); }
+      cx += glyphAdv(ch, bold);
+    }
+    rg.globalCompositeOperation = "source-in";
+    const tinted = colourRun => { const c2 = document.createElement("canvas"); c2.width = run.width; c2.height = run.height; const g2 = c2.getContext("2d"); g2.drawImage(run, 0, 0); g2.globalCompositeOperation = "source-in"; g2.fillStyle = colourRun; g2.fillRect(0, 0, c2.width, c2.height); return c2; };
+    g.imageSmoothingEnabled = false;
+    if (shadow) g.drawImage(tinted(darker(colour)), x + 1, y - 4 + 1);
+    g.drawImage(tinted(colour), x, y - 4);
+    return w - 2;
+  }
+  function darker(colour) {
+    const m = String(colour).match(/\d+/g) || null;
+    if (m && colour.startsWith("rgb")) return "rgb(" + m.slice(0, 3).map(v => Math.floor(v / 4)).join(",") + ")";
+    const h = hex(colour.length === 7 ? colour : "#ffffff"); return "rgb(" + h.map(v => Math.floor(v / 4)).join(",") + ")";
+  }
+  /* § colours to runs: [{t, c, b}]. */
+  function runsOf(text, base) {
+    const out = []; let colour = base || "#ffffff", bold = false;
+    const parts = String(text).split("§"); if (parts[0]) out.push({ t: parts[0], c: colour, b: bold });
+    for (let i = 1; i < parts.length; i++) {
+      const c = parts[i].charAt(0).toLowerCase(), rest = parts[i].slice(1);
+      if (CODES[c]) { colour = CODES[c]; bold = false; } else if (c === "l") bold = true; else if (c === "r") { colour = base || "#ffffff"; bold = false; }
+      if (rest) out.push({ t: rest, c: colour, b: bold });
+    }
+    return out;
+  }
+  const runsWidth = runs => runs.reduce((a, r) => a + textWidth(r.t, r.b), 0);
+  function drawRuns(g, runs, x, y, shadow) { for (const r of runs) x += drawRun(g, r.t, x, y, r.c, r.b, shadow); return x; }
+  /* Page text in the pack's font: every word becomes a small pixel canvas in its colour. */
+  function fontify(el) {
+    if (!mcFont || !el) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const n of nodes) {
+      if (!n.nodeValue) continue;
+      const parent = n.parentNode, cs = getComputedStyle(parent);
+      const bold = parseInt(cs.fontWeight) >= 600, fs = parseFloat(cs.fontSize) || 16;
+      const sc = Math.max(1, Math.round(fs / 8 * 2) / 2), shadow = !parent.closest(".noshadow");
+      const frag = document.createDocumentFragment();
+      for (const word of n.nodeValue.split(/(?<= )/)) {
+        if (!word) continue;
+        const w = textWidth(word, bold) + 1, c = document.createElement("canvas");
+        c.width = Math.max(1, w); c.height = 10; c.className = "mct";
+        drawRun(c.getContext("2d"), word, 0, 0, cs.color, bold, shadow);
+        c.style.width = w * sc + "px"; c.style.height = 10 * sc + "px"; c.style.verticalAlign = (-2 * sc) + "px";
+        frag.appendChild(c); frag.appendChild(document.createElement("wbr"));
+      }
+      parent.replaceChild(frag, n);
+    }
+  }
+
   const TRANSLATE = { "multiplayer.player.joined": "%s oyuna katıldı", "multiplayer.player.left": "%s oyundan ayrıldı", "chat.type.text": "<%s> %s", "chat.type.announcement": "[%s] %s", "commands.message.display.incoming": "%s sana fısıldıyor: %s" };
   function component(c, inherited) {
     if (c == null) return "";
@@ -231,14 +345,22 @@
       const map = new Map();
       const jobs = [];
       zip.forEach((path, entry) => {
-        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui)\/([a-z0-9_\/]+)\.png$/);
-        if (m && (m[1] !== "block" || !m[2].includes("/"))) jobs.push(entry.async("blob").then(b => map.set(m[1] === "block" ? m[2] : m[1] + "/" + m[2], new Blob([b], { type: "image/png" }))));
+        const m = path.match(/^assets\/minecraft\/textures\/(block|item|gui|font|environment)\/([a-z0-9_\/]+)\.png(\.mcmeta)?$/);
+        if (m && (m[1] !== "block" || !m[2].includes("/"))) {
+          // Block textures by bare name (as the world asks for them), everything else by folder/name.
+          const meta = !!m[3], key = (m[1] === "block" && !meta ? m[2] : m[1] + "/" + m[2]) + (meta ? ".mcmeta" : "");
+          jobs.push(entry.async("blob").then(b => map.set(key, new Blob([b], { type: meta ? "application/json" : "image/png" }))));
+        }
+        const f = path.match(/^assets\/minecraft\/font\/([a-z0-9_\/]+)\.json$/);
+        if (f) jobs.push(entry.async("blob").then(b => map.set("fontjson/" + f[1], b)));
       });
       await Promise.all(jobs);
       const blocks = [...map.keys()].filter(k => !k.includes("/")).length;
+      const others = [...map.keys()].filter(k => k.includes("/") && !k.endsWith(".mcmeta") && !k.startsWith("fontjson/")).length;
       if (!map.size) throw new Error("Pakette doku yok");
       userPack = map; resetTextures();
-      document.querySelectorAll(".packName").forEach(e => e.textContent = (label || "Kendi paketin: " + (file.name || "kayıtlı paket")) + " (" + blocks + " blok, " + (map.size - blocks) + " eşya/menü dokusu)");
+      document.querySelectorAll(".packName").forEach(e => e.textContent = (label || "Kendi paketin: " + (file.name || "kayıtlı paket")) + " (" + blocks + " blok, " + others + " eşya/menü dokusu)");
+      await loadFont(); packUi();
       if (save) idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").put(file, "pack"); } catch (e) {} });
     } catch (err) {
       document.querySelectorAll(".packName").forEach(e => e.textContent = "Paket okunamadı: " + err.message);
@@ -246,7 +368,7 @@
   }
   document.querySelectorAll(".packPick").forEach(b => b.onclick = () => $("packFile").click());
   document.querySelectorAll(".packReset").forEach(b => b.onclick = () => {
-    userPack = null; resetTextures();
+    userPack = null; resetTextures(); mcFont = null; packUi();
     idb(db => { try { db.transaction("kv", "readwrite").objectStore("kv").delete("pack"); } catch (e) {} });
     document.querySelectorAll(".packName").forEach(e => e.textContent = "Varsayılan: Pixel Perfection CE");
     serverPack();
@@ -334,19 +456,59 @@
     if (!c) return;
     ac.clearRect(tx, ty, T, T); ac.drawImage(c, tx, ty);
     atlasTex.needsUpdate = true;
+    if (c.anim) startAnim(c.anim, tx, ty);
+  }
+  /* Animated textures (water, lava, fire, sea lanterns…): a strip of frames played as the .mcmeta says. */
+  const anims = [];
+  async function startAnim(a, tx, ty) {
+    let meta = {};
+    try { const b = userPack && userPack.get("block/" + a.file + ".mcmeta"); if (b) meta = JSON.parse(await b.text()).animation || {}; } catch (e) { }
+    const ft = Math.max(1, meta.frametime || 1);
+    const order = (meta.frames || [...Array(a.n).keys()]).map(f => typeof f === "number" ? { i: f, t: ft } : { i: f.index, t: Math.max(1, f.time || ft) }).filter(f => f.i < a.n);
+    if (order.length < 2) return;
+    const frames = [];
+    for (let i = 0; i < a.n; i++) { const fc = await texCanvas(a.img, a.file, i); frames.push({ c: fc, tex: null }); }
+    const total = order.reduce((x, f) => x + f.t, 0);
+    anims.push({ tx, ty, order, frames, total, cur: -1 });
+  }
+  function stepAnims() {
+    if (!anims.length || atlasTex.version === 0) return;
+    const tick = Math.floor(performance.now() / 50);
+    for (const a of anims) {
+      let t = tick % a.total, k = 0;
+      while (t >= a.order[k].t) { t -= a.order[k].t; k++; }
+      const f = a.order[k].i;
+      if (f === a.cur) continue;
+      a.cur = f;
+      const fr = a.frames[f];
+      ac.clearRect(a.tx, a.ty, T, T); ac.drawImage(fr.c, a.tx, a.ty);
+      if (!fr.tex) { fr.tex = new THREE.CanvasTexture(fr.c); fr.tex.flipY = atlasTex.flipY; }
+      try { renderer.copyTextureToTexture(new THREE.Vector2(a.tx, atlas.height - a.ty - T), fr.tex, atlasTex); } catch (e) { atlasTex.needsUpdate = true; }
+    }
+  }
+  /* Frame k of a texture (a strip of square frames) as a 16×16 canvas, tinted like grass and leaves are. */
+  async function texCanvas(img, file, k) {
+    const c = document.createElement("canvas"); c.width = c.height = T; const g = c.getContext("2d");
+    g.imageSmoothingEnabled = false;
+    g.drawImage(img, 0, k * img.width, img.width, img.width, 0, 0, T, T);
+    const tint = tintOf(file);
+    if (tint) {
+      const data = g.getImageData(0, 0, T, T);
+      for (let i = 0; i < data.data.length; i += 4) for (let j = 0; j < 3; j++) data.data[i + j] = data.data[i + j] * tint[j] / 255;
+      g.putImageData(data, 0, 0);
+    }
+    return c;
   }
   /* One face of a block as a 16×16 canvas (tinted grass and leaves), or null when no texture has it. */
   async function faceCanvas(name, face) {
     for (const file of candidates(name, face)) {
       const img = await loadImg(file);
       if (!img) continue;
-      const c = document.createElement("canvas"); c.width = c.height = T; const g = c.getContext("2d");
-      g.imageSmoothingEnabled = false;
-      g.drawImage(img, 0, 0, img.width, img.width, 0, 0, T, T); // animated strips: first frame
-      const tint = tintOf(file);
-      const data = g.getImageData(0, 0, T, T);
-      if (tint) for (let i = 0; i < data.data.length; i += 4) for (let k = 0; k < 3; k++) data.data[i + k] = data.data[i + k] * tint[k] / 255;
+      const c = await texCanvas(img, file, 0);
+      const n = Math.floor(img.height / img.width);
+      if (n > 1) c.anim = { img, file, n };
       if (file === "grass_block_side") {
+        const g = c.getContext("2d"); const data = g.getImageData(0, 0, T, T);
         const over = await loadImg("grass_block_side_overlay");
         if (over) {
           const o = document.createElement("canvas"); o.width = o.height = T; const og = o.getContext("2d"); og.imageSmoothingEnabled = false;
@@ -354,13 +516,13 @@
           const od = og.getImageData(0, 0, T, T).data;
           for (let i = 0; i < od.length; i += 4) if (od[i + 3] > 128) for (let k = 0; k < 3; k++) data.data[i + k] = od[i + k] * TINT.grass_block_side_overlay[k] / 255;
         }
+        g.putImageData(data, 0, 0);
       }
-      g.putImageData(data, 0, 0);
       return c;
     }
     return null;
   }
-  function resetTextures() { tiles.clear(); nextTile = 0; imgCache.clear(); iconCache.clear(); ac.clearRect(0, 0, atlas.width, atlas.height); if (lastHotbar) hotbar(lastHotbar); }
+  function resetTextures() { anims.length = 0; tiles.clear(); nextTile = 0; imgCache.clear(); iconCache.clear(); ac.clearRect(0, 0, atlas.width, atlas.height); if (lastHotbar) hotbar(lastHotbar); }
 
   function tile(name, face) {
     const key = name + "|" + face;
@@ -400,7 +562,7 @@
   /* Graphics settings (⚙), kept on this device: resolution as a share of the screen's, view distance, field of
      view, a frame cap to save battery, and an FPS counter. */
   const DPR = window.devicePixelRatio || 1;
-  const gfxDefault = { res: Math.round(Math.min(DPR, 1.25) / DPR * 20) * 5, view: 120, fov: 70, cap: 0, fps: false };
+  const gfxDefault = { res: Math.round(Math.min(DPR, 1.25) / DPR * 20) * 5, view: 120, fov: 70, cap: 0, fps: false, bob: true };
   let gfx = gfxDefault;
   try { gfx = Object.assign({}, gfxDefault, JSON.parse(store.get("pisan-gfx") || "{}")); } catch (e) { }
   function applyGfx() {
@@ -411,7 +573,7 @@
     $("fps").style.display = gfx.fps ? "block" : "none";
     store.set("pisan-gfx", JSON.stringify(gfx));
   }
-  function resize() { const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  function resize() { const w = cv.clientWidth || innerWidth, h = cv.clientHeight || innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); if (typeof handCam !== "undefined") { handCam.aspect = w / h; handCam.updateProjectionMatrix(); } }
   addEventListener("resize", resize);
   applyGfx();
   const worldGroup = new THREE.Group(); scene.add(worldGroup);
@@ -578,6 +740,18 @@
     return new THREE.Mesh(geo, mat);
   }
   function nameTag(text, team) {
+    if (mcFont) {
+      // As Minecraft: the name over a see-through dark box, 4 canvas pixels per font pixel.
+      const runs = runsOf(text, team === 0 ? "#ff5555" : team === 1 ? "#5599ff" : "#ffffff"), w = runsWidth(runs) + 2, K = 4;
+      const c = document.createElement("canvas"); c.width = w * K; c.height = 10 * K; const g = c.getContext("2d");
+      g.fillStyle = "rgba(0,0,0,.25)"; g.fillRect(0, 0, c.width, c.height);
+      const t = document.createElement("canvas"); t.width = w; t.height = 10; drawRuns(t.getContext("2d"), runs, 1, 1, false);
+      g.imageSmoothingEnabled = false; g.drawImage(t, 0, 0, w * K, 10 * K);
+      const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+      s.scale.set(w * 0.025, 10 * 0.025, 1); s.position.y = 2.15; s.renderOrder = 5;
+      return s;
+    }
     const c = document.createElement("canvas"); const g = c.getContext("2d");
     g.font = "bold 28px monospace"; const w = Math.ceil(g.measureText(text).width) + 16; c.width = w; c.height = 40;
     g.font = "bold 28px monospace"; g.fillStyle = "rgba(0,0,0,.4)"; g.fillRect(0, 0, w, 40);
@@ -611,15 +785,11 @@
     }
     if (p.skin) { const tag = nameTag(p.skin, -1); tag.position.y = h + 0.35; root.add(tag); }
     scene.add(root);
-    return { root, body, head, legs: root.legs, phase: 0, x: p.x, z: p.z, mob: true };
+    return { root, body, head, legs: root.legs, phase: 0, x: p.x, z: p.z, mob: true, mats: [mat, headMat] };
   }
   function makeItemEntity(p) {
     const root = new THREE.Group();
-    const loader = new THREE.TextureLoader();
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, alphaTest: 0.4 });
-    const name = ITEM_ALIAS[p.name] || p.name;
-    loader.load("/tex/item/" + name + ".png", t => { t.magFilter = THREE.NearestFilter; mat.map = t; mat.needsUpdate = true; }, undefined, () => loader.load("/tex/" + name + ".png", t => { t.magFilter = THREE.NearestFilter; mat.map = t; mat.needsUpdate = true; }));
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), mat); m.position.y = 0.2; root.add(m);
+    const m = itemMesh(p.name, "drop"); m.position.y = 0.2; root.add(m);
     scene.add(root);
     return { root, body: m, item: true, x: p.x, z: p.z };
   }
@@ -638,9 +808,103 @@
     const armR = limb(40, 16, -6, 24), armL = limb(32, 48, 6, 24), legR = limb(0, 16, -2, 12), legL = limb(16, 48, 2, 12);
     if (p.name) root.add(nameTag(p.name, p.team));
     scene.add(root);
-    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z };
+    return { root, body, head, armR, armL, legR, legL, phase: 0, x: p.x, z: p.z, mats: [mat] };
   }
   const avatars = new Map();
+  // ---------- items in hands and on the ground, the first-person hand, swings (as Minecraft draws them) ----------
+  const HANDHELD = n => /_sword$|_axe$|_pickaxe$|_shovel$|_hoe$|^stick$|^blaze_rod$|^bone$|^fishing_rod$|^carrot_on_a_stick$|^warped_fungus_on_a_stick$|^trident$|^bamboo$|^debug_stick$/.test(n);
+  const nearestTex = c => { const t = new THREE.CanvasTexture(c); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; return t; };
+  /* A held or dropped item: flat items as a sprite plane, blocks as a small textured cube.
+     kind: "fp" first person, "tp" in another player's hand, "drop" lying on the ground. */
+  function itemMesh(name, kind) {
+    const grp = new THREE.Group();
+    (async () => {
+      const alias = ITEM_ALIAS[name] || name, N = name.toUpperCase();
+      let flat = null;
+      const img = await loadImg("item/" + alias);
+      if (img) { flat = document.createElement("canvas"); flat.width = flat.height = 16; const g = flat.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(img, 0, 0, img.width, img.width, 0, 0, 16, 16); }
+      else { const side = await faceCanvas(N, "side"); if (!side) return; if (FLAT_BLOCK(N)) flat = side; else {
+        const top = (await faceCanvas(N, "top")) || side, bottom = (await faceCanvas(N, "bottom")) || side;
+        const m = c => new THREE.MeshBasicMaterial({ map: nearestTex(c), transparent: true, alphaTest: 0.3 });
+        const ms = m(side), mt = m(top), mb = m(bottom);
+        const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [ms, ms, mt, mb, ms, ms]);
+        // Minecraft's block display: first person turned 45° at 0.4, in the hand 0.375 tilted, dropped 0.25.
+        if (kind === "fp") { cube.rotation.set(0, Math.PI / 4, 0); cube.scale.setScalar(0.4); }
+        else if (kind === "tp") { cube.position.set(0, -0.06, -0.12); cube.rotation.set(75 * Math.PI / 180, Math.PI / 4, 0); cube.scale.setScalar(0.3); }
+        else cube.scale.setScalar(0.25);
+        grp.add(cube); return;
+      } }
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: nearestTex(flat), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+      if (kind === "fp") {
+        // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68.
+        plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(-0.68, 0.68, 0.68);
+      } else if (kind === "tp") {
+        if (HANDHELD(name)) { plane.position.set(0, -0.05, -0.3); plane.rotation.set(-Math.PI / 4 + 0.2, Math.PI / 2, 0, "YXZ"); plane.scale.setScalar(0.75); }
+        else { plane.position.set(0, -0.12, -0.18); plane.rotation.set(0, Math.PI / 2, 0); plane.scale.setScalar(0.45); }
+      } else plane.scale.setScalar(0.35);
+      grp.add(plane);
+    })();
+    return grp;
+  }
+  // The first-person hand lives in its own scene, drawn over the world, as in Minecraft.
+  const handScene = new THREE.Scene();
+  var handCam = new THREE.PerspectiveCamera(70, cv.clientWidth / Math.max(1, cv.clientHeight) || 2, 0.01, 10);
+  const fp = new THREE.Group(); fp.matrixAutoUpdate = false; handScene.add(fp); window.__fp = () => ({ arm: !!fpArm, vis: fpArm && fpArm.visible, item: fpItemName, kids: fp.children.length });
+  let fpItem = null, fpItemName = null, fpArm = null, fpSkin = null, swingAt = -1e9, equipAt = 0, walkDist = 0, bob = 0, lastPos = null;
+  function fpSetItem(name) {
+    if (name === fpItemName) return;
+    fpItemName = name; equipAt = performance.now();
+    if (fpItem) fp.remove(fpItem);
+    fpItem = name ? itemMesh(name, "fp") : null;
+    if (fpItem) fp.add(fpItem);
+    if (fpArm) fpArm.visible = !name;
+  }
+  function fpSetSkin(skin, team) {
+    const key = skin + "|" + team; if (key === fpSkin) return; fpSkin = key;
+    if (fpArm) fp.remove(fpArm);
+    const mat = new THREE.MeshBasicMaterial({ map: skinTexture(skin, team).tex, transparent: true, alphaTest: 0.5 });
+    // Minecraft's right arm: pivot (-5, 2, 0), box (-3, -2, -2) 4×12×4, in pixels.
+    fpArm = new THREE.Group(); const box = part(mat, 40, 16, 4, 12, 4, 0); box.position.set(-1 * PX, 4 * PX, 0); fpArm.add(box);
+    fpArm.visible = !fpItemName; fp.add(fpArm);
+  }
+  const M4 = new THREE.Matrix4(), T4 = new THREE.Matrix4();
+  const mT = (x, y, z) => M4.multiply(T4.makeTranslation(x, y, z));
+  const deg = d => d * Math.PI / 180;
+  const mX = d => M4.multiply(T4.makeRotationX(deg(d))), mY = d => M4.multiply(T4.makeRotationY(deg(d))), mZ = d => M4.multiply(T4.makeRotationZ(deg(d)));
+  /* Minecraft's own first-person poses: view bobbing, the swing (6 ticks), lowering and raising when the item changes. */
+  function fpPose(now, dt) {
+    const t = Math.min(1, (now - swingAt) / 300), sw = t < 1 ? t : 0;
+    const equip = Math.max(0, 1 - (now - equipAt) / 200), drop = equip > 0.5 ? (1 - equip) * 2 : equip * 2; // down then up
+    M4.identity();
+    if (gfx.bob) {
+      const w = walkDist * Math.PI;
+      mT(Math.sin(w) * bob * 0.5, -Math.abs(Math.cos(w) * bob), 0); mZ(Math.sin(w) * bob * 3); mX(Math.abs(Math.cos(w - 0.2) * bob) * 5);
+    }
+    if (fpItemName) {
+      mT(-0.4 * Math.sin(Math.sqrt(sw) * Math.PI), 0.2 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.2 * Math.sin(sw * Math.PI));
+      mT(0.56, -0.52 - drop * 0.6, -0.72);
+      const f = Math.sin(sw * sw * Math.PI), f1 = Math.sin(Math.sqrt(sw) * Math.PI);
+      mY(45 + f * -20); mZ(f1 * -20); mX(f1 * -80); mY(-45);
+      if (charge >= 0 && fpItemName === "bow") { const p = Math.min(1, (now - charge) / 1000); mT(-0.15 * p, 0.05 * p, 0.1 * p); mZ(-20 * p); }
+    } else {
+      mT(-0.3 * Math.sin(Math.sqrt(sw) * Math.PI), 0.4 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.4 * Math.sin(sw * Math.PI));
+      mT(0.64, -0.6 - drop * 0.6, -0.72); mY(45);
+      mY(Math.sin(sw * sw * Math.PI) * 70); mZ(Math.sin(Math.sqrt(sw) * Math.PI) * -20);
+      mT(-1, 3.6, 3.5); mZ(120); mX(200); mY(-135); mT(5.6, 0, 0);
+      mT(-5 * PX, 2 * PX, 0);
+    }
+    fp.matrix.copy(M4); fp.matrixWorldNeedsUpdate = true;
+  }
+  /* Walking: distance and bob amount, as Minecraft works them out per tick. */
+  function fpWalk(x, z, dt, ground) {
+    if (!lastPos) lastPos = { x, z };
+    const d = Math.hypot(x - lastPos.x, z - lastPos.z); lastPos = { x, z };
+    if (d > 2) return;
+    walkDist += d * 0.6;
+    const perTick = dt > 0 ? d / dt * 0.05 : 0;
+    bob += ((ground ? Math.min(0.1, perTick) : 0) - bob) * Math.min(1, dt * 8);
+  }
+
 
   // the ball: a player-head cube with the league ball's texture
   const ballMat = new THREE.MeshBasicMaterial({ map: skinTexture("@ball", -1).tex });
@@ -698,7 +962,7 @@
     rebuildTimer = setTimeout(() => buildWorld({ ...lastWorld, pal: region.pal, ids: region.ids }), 120);
   }
   function chat(html) {
-    const d = document.createElement("div"); d.innerHTML = html; $("chat").appendChild(d);
+    const d = document.createElement("div"); d.innerHTML = html; $("chat").appendChild(d); fontify(d);
     while ($("chat").children.length > 7) $("chat").firstChild.remove();
     setTimeout(() => { d.style.opacity = 0; setTimeout(() => d.remove(), 900); }, 9000);
   }
@@ -706,17 +970,79 @@
   function onText(kind, json) {
     const html = fromJson(json);
     if (kind === "chat") chat(html);
-    else if (kind === "actionbar") { $("actionbar").innerHTML = html; clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 3000); }
+    else if (kind === "actionbar") { $("actionbar").innerHTML = html; fontify($("actionbar")); clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 3000); }
     else if (kind === "title" || kind === "subtitle") {
-      $(kind).innerHTML = html; clearTimeout(titleTimer);
+      $(kind).innerHTML = html; fontify($(kind)); clearTimeout(titleTimer);
       titleTimer = setTimeout(() => { $("title").innerHTML = ""; $("subtitle").innerHTML = ""; }, 3000);
     }
   }
+
+  // ---------- the pack's GUI: buttons, dirt background, crosshair, hearts, hunger, XP and boss bars ----------
+  let packIcons = null, hbS = 2, stat = { hp: 20, food: 20, gm: "survival", xp: [0, 0] }, shownHp = 20, blinkUntil = 0, lostHp = 0;
+  async function packUi() {
+    const has = k => userPack && userPack.get(k);
+    const icons = has("gui/icons") ? await loadImg("gui/icons") : null;
+    const bars = has("gui/bars") ? await loadImg("gui/bars") : null;
+    const widgets = has("gui/widgets") ? await loadImg("gui/widgets") : null;
+    const dirt = has("gui/options_background") ? await loadImg("gui/options_background") : null;
+    const root = document.documentElement.style;
+    const crop = (img, x, y, w, h) => { const k = img.width / 256, c = document.createElement("canvas"); c.width = w; c.height = h; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(img, x * k, y * k, w * k, h * k, 0, 0, w, h); return c; };
+    if (widgets) { root.setProperty("--mcbtn", "url(" + crop(widgets, 0, 66, 200, 20).toDataURL() + ")"); root.setProperty("--mcbtn-on", "url(" + crop(widgets, 0, 86, 200, 20).toDataURL() + ")"); }
+    if (dirt) { const c = document.createElement("canvas"); c.width = c.height = 16; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(dirt, 0, 0, dirt.width, dirt.width, 0, 0, 16, 16); root.setProperty("--dirt", "url(" + c.toDataURL() + ")"); }
+    document.body.classList.toggle("packbtn", !!widgets);
+    document.body.classList.toggle("packdirt", !!dirt);
+    document.body.classList.toggle("packhud", !!icons);
+    packIcons = icons;
+    const cross = $("cross"); cross.innerHTML = "";
+    if (icons) { const c = crop(icons, 0, 0, 15, 15); c.style.width = c.style.height = 15 * 2 + "px"; cross.appendChild(c); }
+    const bar = document.querySelector("#boss .bar");
+    if (bars) { const c = crop(bars, 0, 50, 182, 10); const g = c.getContext("2d"); const k = bars.width / 256; g.clearRect(0, 0, 182, 10); g.drawImage(bars, 0, 50 * k, 182 * k, 5 * k, 0, 0, 182, 5); g.drawImage(bars, 0, 55 * k, 182 * k, 5 * k, 0, 0, 182, 5); const d = document.createElement("canvas"); d.width = 182; d.height = 5; d.getContext("2d").drawImage(c, 0, 0); bar.innerHTML = ""; bar.appendChild(d); bar.classList.add("packbar"); }
+    else { bar.innerHTML = "<i></i>"; bar.classList.remove("packbar"); }
+    hudKey = ""; statusDraw();
+  }
+  /* Hearts, hunger and the XP bar over the hotbar, from gui/icons.png, laid out as Minecraft does. */
+  function statusDraw() {
+    const c = $("status"); if (!packIcons) return;
+    const S = hbS, g = c.getContext("2d"), img = packIcons, k = img.width / 256;
+    c.width = 182; c.height = 18; c.style.width = 182 * S + "px"; c.style.height = 18 * S + "px";
+    c.style.bottom = "calc(max(4px, env(safe-area-inset-bottom)) + " + 22 * S + "px)";
+    g.imageSmoothingEnabled = false; g.clearRect(0, 0, 182, 18);
+    const show = stat.gm !== "creative" && stat.gm !== "spectator";
+    c.style.display = show ? "" : "none"; if (!show) return;
+    const ic = (sx, sy, w, h, x, y) => g.drawImage(img, sx * k, sy * k, w * k, h * k, x, y, w, h);
+    const now = performance.now(), blink = now < blinkUntil && Math.floor((blinkUntil - now) / 150) % 2 === 0;
+    const hp = Math.max(0, Math.round(stat.hp)), food = Math.max(0, Math.round(stat.food));
+    for (let i = 0; i < 10; i++) {
+      const y = hp <= 4 ? Math.floor(Math.random() * 2) : 0, x = i * 8;
+      ic(blink ? 25 : 16, 0, 9, 9, x, y);
+      if (blink) { if (i * 2 + 1 < lostHp) ic(70, 0, 9, 9, x, y); else if (i * 2 + 1 === lostHp) ic(79, 0, 9, 9, x, y); }
+      if (i * 2 + 1 < hp) ic(52, 0, 9, 9, x, y); else if (i * 2 + 1 === hp) ic(61, 0, 9, 9, x, y);
+      const fx = 182 - i * 8 - 9;
+      ic(16, 27, 9, 9, fx, 0);
+      if (i * 2 + 1 < food) ic(52, 27, 9, 9, fx, 0); else if (i * 2 + 1 === food) ic(61, 27, 9, 9, fx, 0);
+    }
+    const prog = charge >= 0 ? Math.min(1, (now - charge) / 1200) : (stat.xp ? stat.xp[1] : 0);
+    ic(0, 64, 182, 5, 0, 11);
+    if (prog > 0) ic(0, 69, Math.round(182 * prog), 5, 0, 11);
+    const lvl = stat.xp ? stat.xp[0] : 0;
+    if (lvl > 0) {
+      const t = String(lvl);
+      if (mcFont) { const w = textWidth(t), x = Math.round((182 - w) / 2); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) drawRun(g, t, x + dx, 5 + dy, "#000000", false, false); drawRun(g, t, x, 5, "#80ff20", false, false); }
+      else { g.font = "bold 8px monospace"; g.textAlign = "center"; g.fillStyle = "#000"; g.fillText(t, 92, 13); g.fillStyle = "#80ff20"; g.fillText(t, 91, 12); }
+    }
+  }
+  setInterval(() => { if (packIcons && playing && (performance.now() < blinkUntil + 200 || stat.hp <= 4)) statusDraw(); }, 50);
+
   let hudKey = "";
   function hud(o) {
-    const key = o.hp + "," + o.food + "," + o.gm + "," + o.r + "," + o.bl + "," + o.c;
+    const key = o.hp + "," + o.food + "," + o.gm + "," + o.r + "," + o.bl + "," + o.c + "," + (o.xp || "");
     if (key === hudKey) return;
     hudKey = key;
+    if (o.hp !== undefined) {
+      if (o.hp < shownHp) { blinkUntil = performance.now() + 1000; lostHp = Math.round(shownHp); }
+      shownHp = o.hp;
+      stat = { hp: o.hp, food: o.food, gm: o.gm, xp: o.xp || [0, 0] }; statusDraw();
+    }
     if (o.hp !== undefined && o.gm !== "creative" && o.gm !== "spectator") {
       const hearts = Math.ceil(o.hp / 2), food = Math.ceil(o.food / 2);
       $("stats").innerHTML = "<span style='color:#ff4040'>" + "♥".repeat(hearts) + "<span style='color:#444'>" + "♥".repeat(Math.max(0, 10 - hearts)) + "</span></span><span style='color:#c87a2a'>" + "<span style='color:#444'>" + "●".repeat(Math.max(0, 10 - food)) + "</span>" + "●".repeat(food) + "</span>";
@@ -724,6 +1050,7 @@
     if (o.r === undefined) { $("boss").style.display = "none"; return; }
     $("boss").style.display = "block";
     $("score").innerHTML = "<span style='color:#ff5555'>Kırmızı " + o.r + "</span> - <span style='color:#5599ff'>" + o.bl + " Mavi</span> <span style='color:#ddd'>" + esc(o.c) + "</span>";
+    fontify($("score"));
   }
 
   // ---------- items: icons from the pack (item, else block texture), heads from skins ----------
@@ -880,7 +1207,7 @@
     for (const lb of L.labels) {
       const t = document.createElement("div"); t.className = "guitext";
       if (lb.title) t.innerHTML = legacy(lb.t, "#404040"); else t.textContent = lb.t;
-      t.style.left = lb.x * S + "px"; t.style.top = (lb.y - 1) * S + "px"; gui.appendChild(t);
+      t.style.left = lb.x * S + "px"; t.style.top = (lb.y - (mcFont ? 2 : 1)) * S + "px"; gui.appendChild(t); t.classList.add("noshadow"); fontify(t);
     }
     const itemOf = i => typeof i === "number" ? o.items[i] : i.own !== undefined ? o.own[i.own] : i.armor !== undefined ? (o.armor || [])[i.armor] : (o.craft || [])[i.craft];
     const slotNo = i => typeof i === "number" ? i : i.own !== undefined ? o.ownStart + i.own : i.armor !== undefined ? [5, 6, 7, 8, 45][i.armor] : i.craft;
@@ -912,7 +1239,7 @@
     if (!item || !item.m) { tip.style.display = "none"; return; }
     const pretty = item.m.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
     tip.innerHTML = legacy(item.name || pretty, "#ffffff") + (item.lore ? "<br>" + item.lore.map(l => legacy(l, "#aa00aa")).join("<br>") : "");
-    tip.style.display = "block";
+    fontify(tip); tip.style.display = "block";
     const r = near.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
     let x = r.right + 8, y = r.top - 12;
     if (x + tw > innerWidth - 4) x = r.left - tw - 8;
@@ -949,8 +1276,10 @@
   /* The hotbar as in Minecraft: nine slots in a grey strip, the chosen one framed. */
   function hotbar(o) {
     lastHotbar = o;
+    const inHand = o.items[o.held]; fpSetItem(inHand && inHand.m ? inHand.m : null);
     const bar = $("hotbar"); bar.innerHTML = ""; held = o.held;
     const S = Math.max(1.5, Math.min(2.5, innerWidth * 0.48 / 182));
+    if (S !== hbS) { hbS = S; statusDraw(); }
     bar.style.width = 182 * S + "px"; bar.style.height = 22 * S + "px";
     const c = document.createElement("canvas"); c.width = 184; c.height = 24; c.className = "hbbg";
     c.style.width = 184 * S + "px"; c.style.height = 24 * S + "px"; c.style.left = c.style.top = -S + "px";
@@ -986,7 +1315,7 @@
   }
   let infoTimer = 0;
   function showInfo(item) {
-    $("actionbar").innerHTML = legacy(item.name || item.m); clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 2000);
+    $("actionbar").innerHTML = legacy(item.name || item.m); fontify($("actionbar")); clearTimeout(barTimer); barTimer = setTimeout(() => $("actionbar").innerHTML = "", 2000);
   }
   function closeOverlay() { $("overlay").classList.remove("on"); $("gui").style.display = "none"; $("panel").style.display = ""; $("tip").style.display = "none"; $("carried").style.display = "none"; menuOpen = null; }
 
@@ -1010,6 +1339,9 @@
     const fl = document.createElement("label"); fl.style.cssText = "color:#333;display:block;margin-top:8px";
     const fc = document.createElement("input"); fc.type = "checkbox"; fc.checked = gfx.fps; fc.onchange = () => { gfx.fps = fc.checked; applyGfx(); };
     fl.appendChild(fc); fl.appendChild(document.createTextNode(" FPS göster")); p.appendChild(fl);
+    const bl = document.createElement("label"); bl.style.cssText = "color:#333;display:block;margin-top:8px";
+    const bc = document.createElement("input"); bc.type = "checkbox"; bc.checked = gfx.bob; bc.onchange = () => { gfx.bob = bc.checked; applyGfx(); };
+    bl.appendChild(bc); bl.appendChild(document.createTextNode(" Görünüm sallanması (yürürken)")); p.appendChild(bl);
     const d = document.createElement("button"); d.className = "mcbtn"; d.textContent = "Varsayılan görüntü"; d.onclick = () => { gfx = Object.assign({}, gfxDefault); applyGfx(); $("bSet").onclick(); }; p.appendChild(d);
     const c = document.createElement("button"); c.className = "mcbtn"; c.textContent = "Tamam"; c.onclick = closeOverlay; p.appendChild(c);
     $("overlay").classList.add("on");
@@ -1029,6 +1361,17 @@
   // ---------- floating texts (lobby leaderboards) ----------
   function textSprite(text) {
     const lines = String(text).split("\n");
+    if (mcFont) {
+      const runs = lines.map(l => runsOf(l)), w = Math.min(400, Math.max(...runs.map(runsWidth)) + 4), K = 3;
+      const t = document.createElement("canvas"); t.width = w; t.height = lines.length * 10 + 2; const tg = t.getContext("2d");
+      tg.fillStyle = "rgba(0,0,0,.25)"; tg.fillRect(0, 0, t.width, t.height);
+      runs.forEach((r, i) => drawRuns(tg, r, Math.round((w - runsWidth(r)) / 2), 1 + i * 10, true));
+      const c = document.createElement("canvas"); c.width = t.width * K; c.height = t.height * K; const g = c.getContext("2d"); g.imageSmoothingEnabled = false; g.drawImage(t, 0, 0, c.width, c.height);
+      const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.LinearFilter;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+      s.scale.set(t.width * 0.025, t.height * 0.025, 1);
+      return s;
+    }
     const c = document.createElement("canvas"); const g = c.getContext("2d");
     const fs = 26; g.font = "bold " + fs + "px monospace";
     const w = Math.min(1400, Math.max(...lines.map(l => g.measureText(plain(l)).width)) + 24);
@@ -1125,6 +1468,7 @@
     if (clockOff === null || off < clockOff) clockOff = off; else clockOff += 0.02; // follows slow clock drift
     wobble = wobble * 0.95 + (off - clockOff) * 0.05;
     snaps.push({ at: o.ts + clockOff, d: o }); if (snaps.length > 16) snaps.shift();
+    if (o.an) for (const [id, k] of o.an) { const a = avatars.get(id); if (!a) continue; if (k === "s") a.swingAt = performance.now(); else a.hurtAt = performance.now(); }
   }
   function sample() {
     if (!snaps.length) return null;
@@ -1133,13 +1477,13 @@
     for (let i = 0; i < snaps.length - 1; i++) if (snaps[i].at <= now && snaps[i + 1].at >= now) { a = snaps[i]; b = snaps[i + 1]; break; }
     const t = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
     const prev = new Map(a.d.p.map(q => [q[0], q]));
-    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, keeper: String(q[0]).startsWith("a") }; });
+    const people = b.d.p.map(q => { const o = prev.get(q[0]) || q; return { id: q[0], name: q[1], team: q[2], x: lerp(o[3], q[3], t), y: lerp(o[4], q[4], t), z: lerp(o[5], q[5], t), yaw: lerpAngle(o[6], q[6], t), pitch: q[7], sneak: q[8] === 1, skin: q[9] || "", kind: q[10] || "p", w: q[11] || 0.6, h: q[12] || 1.8, held: q[13] || "", keeper: String(q[0]).startsWith("a") }; });
     const ball = b.d.b && a.d.b ? [0, 1, 2].map(i => lerp(a.d.b[i], b.d.b[i], t)) : b.d.b;
     return { people, ball, latest: b.d };
   }
 
   let lastFrame = performance.now(), lastBall = null, lastTurn = null;
-  let lastDraw = 0, fpsCount = 0, fpsAt = 0;
+  let lastDraw = 0, fpsCount = 0, fpsAt = 0, wasCharging = false;
   function frame() {
     requestAnimationFrame(frame);
     if (!playing || !$("game").classList.contains("on")) return;
@@ -1184,10 +1528,16 @@
         const swing = Math.sin(a.phase) * Math.min(1, moved * 12) * 0.9;
         a.root.position.set(px, py, pz);
         a.root.rotation.y = -yawDeg * Math.PI / 180;
-        if (a.item) { a.body.rotation.y += dt * 2; continue; }
+        if (a.item) { a.body.rotation.y += dt * 2; a.body.position.y = 0.2 + Math.sin(now / 320) * 0.06; continue; }
+        if (a.mats) { const hurt = a.hurtAt && now - a.hurtAt < 500; if (hurt !== !!a.red) { a.red = hurt; a.mats.forEach(m => m.color.setRGB(1, hurt ? 0.45 : 1, hurt ? 0.45 : 1)); } }
+        if (isMe) fpSetSkin(p.skin, p.team);
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
         if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = k % 2 ? swing : -swing); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
+        // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
+        if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.y = -10 * PX; a.armR.add(a.heldMesh); } }
+        if (p.held) a.armR.rotation.x = a.armR.rotation.x * 0.5 - Math.PI / 10;
+        if (a.swingAt) { const t = (now - a.swingAt) / 300; if (t < 1) { a.armR.rotation.x -= Math.sin(t * Math.PI) * 1.3 + Math.sin(Math.sqrt(t) * Math.PI) * 0.4; a.armR.rotation.y = Math.sin(Math.sqrt(t) * Math.PI) * 0.3; } else a.armR.rotation.y = 0; }
         a.body.rotation.x = sneak ? 0.45 : 0; a.body.position.y = sneak ? -0.2 : 0;
         a.root.visible = !(isMe && !thirdPerson && !cam);
       }
@@ -1211,11 +1561,23 @@
       const eye = new THREE.Vector3(me.rx ?? me.x, (me.ry ?? me.y) + (me.sneak ? 1.27 : 1.62), me.rz ?? me.z);
       if (thirdPerson) { camera.position.copy(eye).addScaledVector(dir, -4); camera.position.y += 0.4; } else camera.position.copy(eye);
       camera.lookAt(eye.clone().add(dir));
+      fpWalk(me.rx ?? me.x, me.rz ?? me.z, dt, me.ground);
+      if (gfx.bob && !thirdPerson) {
+        const w = walkDist * Math.PI;
+        camera.rotateZ(-deg(Math.sin(w) * bob * 3)); camera.rotateX(-deg(Math.abs(Math.cos(w - 0.2) * bob) * 5));
+        camera.translateX(Math.sin(w) * bob * 0.5); camera.translateY(-Math.abs(Math.cos(w) * bob));
+      }
     }
+    if (packIcons && (charge >= 0 || wasCharging)) { statusDraw(); wasCharging = charge >= 0; }
     const xp = $("xp");
     if (charge >= 0) { const p = Math.min(1, (performance.now() - charge) / 1200); xp.firstChild.style.width = (p * 100) + "%"; xp.classList.toggle("power", p >= 1); }
     else { xp.firstChild.style.width = "0"; xp.classList.remove("power"); }
+    stepAnims();
     renderer.render(scene, camera);
+    if (!thirdPerson && !cam && me.ready) {
+      fpPose(now, dt);
+      renderer.autoClear = false; renderer.clearDepth(); renderer.render(handScene, handCam); renderer.autoClear = true;
+    }
   }
   requestAnimationFrame(frame);
 
@@ -1231,7 +1593,10 @@
   }
   // In the background (frames paused) keep the server informed.
   setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);
-  const act = a => { send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12); };
+  const act = a => {
+    send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12);
+    if (a === "ldown" || (a === "rdown" && fpItemName !== "bow")) { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
+  };
   const rightDown = () => { charge = performance.now(); act("rdown"); };
   const rightUp = () => { charge = -1; act("rup"); };
 
