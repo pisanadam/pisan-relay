@@ -1660,22 +1660,50 @@
         else cube.scale.setScalar(0.25);
         grp.add(cube); return;
       } }
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: nearestTex(flat), transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+      const plane = extruded(flat);
       if (x.g) { const mk = document.createElement("canvas"); mk.width = mk.height = 16; const mg = mk.getContext("2d"), d = flat.getContext("2d").getImageData(0, 0, 16, 16), o = mg.createImageData(16, 16); for (let i = 0; i < 1024; i += 4) { const v = d.data[i + 3] > 128 ? 255 : 0; o.data[i] = o.data[i + 1] = o.data[i + 2] = v; o.data[i + 3] = 255; } mg.putImageData(o, 0, 0); plane.userData.mask = nearestTex(mk); }
+      const ROD = /^(fishing_rod|carrot_on_a_stick|warped_fungus_on_a_stick)$/.test(name);
       if (kind === "fp") {
-        // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68.
-        plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(-0.68, 0.68, 0.68);
+        // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68;
+        // item/handheld_rod (rods): rotation (0, 90, 25), translation (0, 1.6, 0.8)/16; the crossbow: rotation (-90, 0, -55).
+        if (ROD) { plane.position.set(0, 1.6 / 16, 0.8 / 16); plane.rotation.set(0, Math.PI / 2, deg(25)); plane.scale.set(0.68, 0.68, 0.68); }
+        else if (name === "crossbow") { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(deg(-90), 0, deg(-55)); plane.scale.set(0.68, 0.68, 0.68); }
+        else { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(0.68, 0.68, 0.68); }
       } else if (kind === "tp" || kind === "tpl") {
         // thirdperson_righthand of item/handheld: rotation (0, -90, 55), translation (0, 4, 0.5)/16, scale 0.85;
+        // of item/handheld_rod: rotation (0, 90, 55), translation (0, 4, 2.5)/16;
         // of item/generated: translation (0, 3, 1)/16, scale 0.55. The left hand mirrors them.
         const sg = kind === "tpl" ? -1 : 1;
-        if (HANDHELD(name)) { plane.position.set(0, 4 / 16, 0.5 / 16); plane.rotation.set(0, sg * -Math.PI / 2, sg * 55 * Math.PI / 180); plane.scale.set(0.85, 0.85, 0.85); }
+        if (ROD) { plane.position.set(0, 4 / 16, 2.5 / 16); plane.rotation.set(0, sg * Math.PI / 2, sg * 55 * Math.PI / 180); plane.scale.set(0.85, 0.85, 0.85); }
+        else if (HANDHELD(name)) { plane.position.set(0, 4 / 16, 0.5 / 16); plane.rotation.set(0, sg * -Math.PI / 2, sg * 55 * Math.PI / 180); plane.scale.set(0.85, 0.85, 0.85); }
         else { plane.position.set(0, 3 / 16, 1 / 16); plane.scale.set(0.55, 0.55, 0.55); }
       } else plane.scale.setScalar(0.35);
       grp.add(plane);
     }
   }
 
+  /* A flat item as Minecraft makes it (ItemModelGenerator): the picture one pixel thick, with a side face along
+     every edge between a filled and an empty pixel; the sides shaded as the game lights them. */
+  function extruded(canvas) {
+    const d = canvas.getContext("2d").getImageData(0, 0, 16, 16).data, op = (x, y) => x >= 0 && y >= 0 && x < 16 && y < 16 && d[(y * 16 + x) * 4 + 3] > 25;
+    const pos = [], uv = [], col = [], idx = [];
+    const quad = (pts, uvs, c) => { const b = pos.length / 3; for (const q of pts) pos.push(q[0], q[1], q[2]); uv.push(...uvs); for (let i = 0; i < 4; i++) col.push(c, c, c); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
+    const z0 = -0.5 / 16, z1 = 0.5 / 16;
+    quad([[-0.5, -0.5, z1], [0.5, -0.5, z1], [0.5, 0.5, z1], [-0.5, 0.5, z1]], [0, 0, 1, 0, 1, 1, 0, 1], 1);
+    quad([[0.5, -0.5, z0], [-0.5, -0.5, z0], [-0.5, 0.5, z0], [0.5, 0.5, z0]], [1, 0, 0, 0, 0, 1, 1, 1], 1);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+      if (!op(x, y)) continue;
+      const uc = (x + 0.5) / 16, vc = 1 - (y + 0.5) / 16, u = [uc, vc, uc, vc, uc, vc, uc, vc];
+      const xl = x / 16 - 0.5, xr = (x + 1) / 16 - 0.5, yt = 0.5 - y / 16, yb = 0.5 - (y + 1) / 16;
+      if (!op(x - 1, y)) quad([[xl, yb, z0], [xl, yb, z1], [xl, yt, z1], [xl, yt, z0]], u, 0.6);
+      if (!op(x + 1, y)) quad([[xr, yb, z1], [xr, yb, z0], [xr, yt, z0], [xr, yt, z1]], u, 0.6);
+      if (!op(x, y - 1)) quad([[xl, yt, z1], [xr, yt, z1], [xr, yt, z0], [xl, yt, z0]], u, 1);
+      if (!op(x, y + 1)) quad([[xl, yb, z0], [xr, yb, z0], [xr, yb, z1], [xl, yb, z1]], u, 0.5);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx);
+    return new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: nearestTex(canvas), vertexColors: true, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide }));
+  }
   /* An item in a hand, the way Minecraft puts it there: from the arm's pivot, turned into the model's own
      (upside-down) frame, rotated -90° about x and 180° about y, moved (±1/16, 2/16, -10/16), then the item's
      own third-person display transform (done in itemMesh). */
@@ -1687,54 +1715,186 @@
     a3.add(itemMesh(spec, left ? "tpl" : "tp"));
     return holder;
   }
-  // The first-person hand lives in its own scene, drawn over the world, as in Minecraft.
+  // The first-person hands live in their own scene, drawn over the world, as in Minecraft (ItemInHandRenderer).
   const handScene = new THREE.Scene();
   var handCam = new THREE.PerspectiveCamera(70, cv.clientWidth / Math.max(1, cv.clientHeight) || 2, 0.01, 10);
-  const fp = new THREE.Group(); fp.matrixAutoUpdate = false; handScene.add(fp);
-  let fpItem = null, fpItemName = null, fpArm = null, fpSkin = null, swingAt = -1e9, equipAt = 0, walkDist = 0, bob = 0, lastPos = null;
-  function fpSetItem(name) {
-    if (name === fpItemName) return;
-    fpItemName = name; equipAt = performance.now();
-    if (fpItem) fp.remove(fpItem);
-    fpItem = name ? itemMesh(name, "fp") : null;
-    if (fpItem) fp.add(fpItem);
-    if (fpArm) fpArm.visible = !name;
+  const fpMain = new THREE.Group(), fpOff = new THREE.Group();
+  fpMain.matrixAutoUpdate = false; fpOff.matrixAutoUpdate = false; handScene.add(fpMain, fpOff);
+  // What each hand shows: changes go down and come back up (ItemInHandRenderer.tick), the arm when the main hand is empty.
+  const H = { want: null, shown: null, mesh: null, variant: null, h: 0, oh: 0,
+              offWant: null, offShown: null, offMesh: null, offH: 0, offOH: 0,
+              str: 100, swinging: false, swingT: 0, swing: 0, oSwing: 0, xBob: 0, yBob: 0, oxBob: 0, oyBob: 0, yawU: 0, yawLast: null,
+              hurtT: 0, acc: 0 };
+  let fpArm = null, fpSkin = null, swingAt = -1e9, walkDist = 0, bob = 0, lastPos = null;
+  const itemBase = spec => spec ? parseSpec(spec).name : "";
+  function fpSetItem(spec) {
+    // Another kind of item restarts the attack cooldown (Player.tick: resetAttackStrengthTicker).
+    if (itemBase(spec) !== itemBase(H.want)) H.str = 0;
+    H.want = spec || null;
   }
-  function fpSetSkin(skin, team) {
-    const key = skin + "|" + team; if (key === fpSkin) return; fpSkin = key;
-    if (fpArm) fp.remove(fpArm);
-    const mat = new THREE.MeshBasicMaterial({ map: skinTexture(skin, team).tex, transparent: true, alphaTest: 0.5 });
-    // Minecraft's right arm: pivot (-5, 2, 0), box (-3, -2, -2) 4×12×4, in pixels.
-    fpArm = new THREE.Group(); const box = part(mat, 40, 16, 4, 12, 4, 0); box.position.set(-1 * PX, 4 * PX, 0); fpArm.add(box);
-    fpArm.visible = !fpItemName; fp.add(fpArm);
+  function fpSetOff(spec) { H.offWant = spec || null; }
+  function fpSetSkin(skin, team, slim) {
+    const key = skin + "|" + team + "|" + (slim ? 1 : 0); if (key === fpSkin) return; fpSkin = key;
+    if (fpArm) fpMain.remove(fpArm);
+    const mat = new THREE.MeshBasicMaterial({ map: skinTexture(skin, team).tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide });
+    // PlayerRenderer.renderRightHand: the model's right arm and sleeve, as they are in the model (y down), from the
+    // pivot (-5, 2, 0) — slim arms (-5, 2.5, 0) and 3 pixels wide.
+    fpArm = new THREE.Group(); fpArm.position.set(-5 * PX, (slim ? 2.5 : 2) * PX, 0);
+    const flip = new THREE.Group(); flip.rotation.x = Math.PI; fpArm.add(flip); // our model parts are built turned over
+    const w = slim ? 3 : 4, cx = slim ? -0.5 : -1;
+    const arm = part(mat, 40, 16, w, 12, 4, 0); arm.position.set(cx * PX, -4 * PX, 0); flip.add(arm);
+    const sleeve = part(mat, 40, 32, w, 12, 4, 0.5); sleeve.position.set(cx * PX, -4 * PX, 0); flip.add(sleeve);
+    fpMain.add(fpArm); fpArm.visible = !H.shown;
+  }
+  // Seconds per full-strength hit (attribute attack speed), for the cooldown dip after each swing.
+  function attackSpeed(spec) {
+    const n = itemBase(spec);
+    if (/_sword$/.test(n)) return 1.6;
+    if (/_axe$/.test(n)) return /^(wooden|stone)_/.test(n) ? 0.8 : /^iron_/.test(n) ? 0.9 : 1.0;
+    if (/_pickaxe$/.test(n)) return 1.2;
+    if (/_shovel$/.test(n)) return 1.0;
+    if (/_hoe$/.test(n)) return /^(wooden|golden)_/.test(n) ? 1 : /^stone_/.test(n) ? 2 : /^iron_/.test(n) ? 3 : 4;
+    if (n === "trident") return 1.1;
+    return 4;
+  }
+  const EAT_DUR = n => n === "dried_kelp" ? 16 : /^(potion|milk_bucket)$/.test(n) ? 32 : n === "honey_bottle" ? 40 : 32;
+  function useAnim(n) {
+    if (n === "bow") return "bow";
+    if (n === "crossbow") return "crossbow";
+    if (n === "trident") return "spear";
+    if (n === "shield") return "block";
+    if (/^(spyglass|goat_horn)$/.test(n)) return "none";
+    if (/^(potion|milk_bucket|honey_bottle)$/.test(n)) return "drink";
+    return "eat";
+  }
+  /* One client tick (20 per second): hand heights, the swing, the lagging view sway. */
+  function fpTick() {
+    H.oh = H.h; H.offOH = H.offH; H.oSwing = H.swing; H.oxBob = H.xBob; H.oyBob = H.yBob;
+    H.xBob += (me.pitch - H.xBob) * 0.5; H.yBob += (H.yawU - H.yBob) * 0.5;
+    H.str++;
+    if (H.swinging) { H.swingT++; if (H.swingT >= 6) { H.swingT = 0; H.swinging = false; } } else H.swingT = 0;
+    H.swing = H.swingT / 6;
+    const f = Math.min(1, Math.max(0, (H.str + 0.5) / (20 / attackSpeed(H.shown))));
+    H.h += Math.max(-0.4, Math.min(0.4, (H.want === H.shown ? f * f * f : 0) - H.h));
+    if (H.h < 0.1 && H.want !== H.shown) { H.shown = H.want; H.variant = null; }
+    H.offH += Math.max(-0.4, Math.min(0.4, (H.offWant === H.offShown ? 1 : 0) - H.offH));
+    if (H.offH < 0.1 && H.offWant !== H.offShown) {
+      H.offShown = H.offWant;
+      if (H.offMesh) fpOff.remove(H.offMesh);
+      H.offMesh = null;
+      if (H.offShown) { H.offMesh = new THREE.Group(); H.offMesh.scale.x = -1; H.offMesh.add(fpItemMesh(H.offShown, false)); fpOff.add(H.offMesh); }
+    }
+    if (H.hurtT > 0) H.hurtT--;
+  }
+  function fpSwing() { if (!H.swinging || H.swingT >= 3 || H.swingT < 0) { H.swingT = -1; H.swinging = true; } H.str = 0; }
+  function fpHurt() { H.hurtT = 10; }
+  /* The item as first person shows it: its display transform from the model, the bow drawn back, the shield up. */
+  function fpItemMesh(spec, blocking) {
+    const name = itemBase(spec);
+    if (name === "shield") return shieldModel(spec, blocking ? "fpb" : "fp");
+    return itemMesh(spec, "fp");
+  }
+  // A shield as the game draws it (ShieldModel through its item display transforms).
+  function shieldModel(spec, kind) {
+    const outer = new THREE.Group();
+    const D = { fp: [[-10, 2, -10], [0, 180, 5], 1.25], fpb: [[-15, 5, -11], [0, 180, -5], 1.25] }[kind];
+    outer.position.set(D[0][0] / 16, D[0][1] / 16, D[0][2] / 16); outer.rotation.set(deg(D[1][0]), deg(D[1][1]), deg(D[1][2])); outer.scale.setScalar(D[2]);
+    const corner = new THREE.Group(); corner.position.set(-0.5, -0.5, -0.5); outer.add(corner);
+    (async () => {
+      const c = await shieldTexture(parseSpec(spec).x); if (!c) return;
+      const mat = new THREE.MeshBasicMaterial({ map: nearestTex(c), transparent: true, alphaTest: 0.1, side: THREE.DoubleSide });
+      // BlockEntityWithoutLevelRenderer scales the model by (1, -1, -1) — our model parts are built that way round —:
+      // the plate (-6,-11,-2)+(12,22,1) at uv (0,0) and the handle (-1,-3,-1)+(2,6,6) at uv (26,0).
+      const plate = part(mat, 0, 0, 12, 22, 1, 0); plate.position.set(0, 0, 1.5 / 16); corner.add(plate);
+      const handle = part(mat, 26, 0, 2, 6, 6, 0); handle.position.set(0, 0, -2 / 16); corner.add(handle);
+    })();
+    return outer;
   }
   const M4 = new THREE.Matrix4(), T4 = new THREE.Matrix4();
   const mT = (x, y, z) => M4.multiply(T4.makeTranslation(x, y, z));
+  const mS = (x, y, z) => M4.multiply(T4.makeScale(x, y, z));
   const deg = d => d * Math.PI / 180;
   const mX = d => M4.multiply(T4.makeRotationX(deg(d))), mY = d => M4.multiply(T4.makeRotationY(deg(d))), mZ = d => M4.multiply(T4.makeRotationZ(deg(d)));
-  /* Minecraft's own first-person poses: view bobbing, the swing (6 ticks), lowering and raising when the item changes. */
+  /* GameRenderer.renderItemInHand + ItemInHandRenderer.renderHandsWithItems / renderArmWithItem, for both hands. */
   function fpPose(now, dt) {
-    const t = Math.min(1, (now - swingAt) / 300), sw = t < 1 ? t : 0;
-    const drop = Math.max(0, 1 - (now - equipAt) / 200); // a new item comes up from below, as in Minecraft
-    M4.identity();
+    // Ticks at 20 per second; the poses in between are interpolated with the partial tick, as the game does.
+    if (H.yawLast === null) { H.yawLast = me.yaw; H.yawU = me.yaw; H.yBob = H.oyBob = me.yaw; H.xBob = H.oxBob = me.pitch; }
+    H.yawU += ((((me.yaw - H.yawLast) % 360) + 540) % 360) - 180; H.yawLast = me.yaw;
+    H.acc += Math.min(dt, 0.25);
+    while (H.acc >= 0.05) { H.acc -= 0.05; fpTick(); }
+    const pt = H.acc / 0.05, lerpF = (a, b) => a + (b - a) * pt;
+    let sw = H.swing - H.oSwing; if (sw < 0) sw += 1; sw = H.oSwing + sw * pt; if (!H.swinging && H.swingT === 0 && H.oSwing === 0) sw = 0;
+    // Which picture the main hand shows (a bow being drawn changes it), rebuilt when it changes.
+    const using = usingItem(), useName = using && lastHotbar ? itemBase(specOf(lastHotbar.items[lastHotbar.held])) : "";
+    const useT = using && charge >= 0 ? (now - charge) / 50 : -1;
+    let variant = H.shown;
+    if (H.shown && itemBase(H.shown) === "bow" && using && useName === "bow") { const p = useT / 20, pw = Math.min(1, (p * p + p * 2) / 3); variant = pw >= 0.9 ? "bow_pulling_2" : pw >= 0.65 ? "bow_pulling_1" : "bow_pulling_0"; }
+    const blocking = using && useName === "shield" && itemBase(H.shown) === "shield";
+    const vkey = (variant || "") + (blocking ? "|b" : "");
+    if (vkey !== H.variant) {
+      H.variant = vkey;
+      if (H.mesh) fpMain.remove(H.mesh);
+      H.mesh = variant ? fpItemMesh(variant, blocking) : null;
+      if (H.mesh) fpMain.add(H.mesh);
+    }
+    if (fpArm) fpArm.visible = !H.shown;
+    // The view: hurt shake (bobHurt) and walking bob (bobView) — they move both hands.
+    const base = new THREE.Matrix4(); M4.identity();
+    if (H.hurtT > 0) { let f = H.hurtT - pt; if (f >= 0) { f /= 10; f = Math.sin(f * f * f * f * Math.PI); mZ(-f * 14); } }
     if (gfx.bob) {
-      const w = walkDist * Math.PI;
+      const w = -walkDist * Math.PI;
       mT(Math.sin(w) * bob * 0.5, -Math.abs(Math.cos(w) * bob), 0); mZ(Math.sin(w) * bob * 3); mX(Math.abs(Math.cos(w - 0.2) * bob) * 5);
     }
-    if (fpItemName) {
-      mT(-0.4 * Math.sin(Math.sqrt(sw) * Math.PI), 0.2 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.2 * Math.sin(sw * Math.PI));
-      mT(0.56, -0.52 - drop * 0.6, -0.72);
-      const f = Math.sin(sw * sw * Math.PI), f1 = Math.sin(Math.sqrt(sw) * Math.PI);
-      mY(45 + f * -20); mZ(f1 * -20); mX(f1 * -80); mY(-45);
-      if (charge >= 0 && /^bow(~|$)/.test(fpItemName || "")) { const p = Math.min(1, (now - charge) / 1000); mT(-0.15 * p, 0.05 * p, 0.1 * p); mZ(-20 * p); }
-    } else {
-      mT(-0.3 * Math.sin(Math.sqrt(sw) * Math.PI), 0.4 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.4 * Math.sin(sw * Math.PI));
-      mT(0.64, -0.6 - drop * 0.6, -0.72); mY(45);
-      mY(Math.sin(sw * sw * Math.PI) * 70); mZ(Math.sin(Math.sqrt(sw) * Math.PI) * -20);
+    // The hands lag a little behind quick turns of the view.
+    mX((me.pitch - lerpF(H.oxBob, H.xBob)) * 0.1); mY((H.yawU - lerpF(H.oyBob, H.yBob)) * 0.1);
+    base.copy(M4);
+    // Main (right) hand.
+    const equip = 1 - lerpF(H.oh, H.h);
+    if (!H.shown) {
+      // renderPlayerArm
+      const f1 = Math.sqrt(sw);
+      mT(-0.3 * Math.sin(f1 * Math.PI) + 0.64000005, 0.4 * Math.sin(f1 * Math.PI * 2) - 0.6 - equip * 0.6, -0.4 * Math.sin(sw * Math.PI) - 0.71999997);
+      mY(45);
+      mY(Math.sin(f1 * Math.PI) * 70); mZ(Math.sin(sw * sw * Math.PI) * -20);
       mT(-1, 3.6, 3.5); mZ(120); mX(200); mY(-135); mT(5.6, 0, 0);
-      mT(-5 * PX, 2 * PX, 0);
+    } else armWithItem(1, equip, sw, using ? useAnim(useName) : null, useT, pt);
+    fpMain.matrix.copy(M4); fpMain.matrixWorldNeedsUpdate = true;
+    // Off (left) hand: only when it holds something; it does not swing.
+    M4.copy(base);
+    if (H.offShown) armWithItem(-1, 1 - lerpF(H.offOH, H.offH), 0, null, -1, pt);
+    fpOff.visible = !!H.offShown;
+    fpOff.matrix.copy(M4); fpOff.matrixWorldNeedsUpdate = true;
+  }
+  const armTransform = (k, equip) => mT(k * 0.56, -0.52 + equip * -0.6, -0.72);
+  function armWithItem(k, equip, sw, anim, useT, pt) {
+    if (anim === "eat" || anim === "drink") {
+      const dur = EAT_DUR(itemBase(H.shown)), el = useT % (dur + 4), f = dur - el; // remaining ticks + 1
+      const f1 = Math.max(0, f) / dur;
+      if (f1 < 0.8) mT(0, Math.abs(Math.cos(f / 4 * Math.PI) * 0.1), 0);
+      const f3 = 1 - Math.pow(Math.min(1, f1), 27);
+      mT(f3 * 0.6 * k, f3 * -0.5, 0); mY(k * f3 * 90); mX(f3 * 10); mZ(k * f3 * 30);
+      armTransform(k, equip);
+    } else if (anim === "block" || anim === "none" || anim === "crossbow") {
+      armTransform(k, equip);
+    } else if (anim === "bow") {
+      armTransform(k, equip);
+      mT(k * -0.2785682, 0.18344387, 0.15731531); mX(-13.935); mY(k * 35.3); mZ(k * -9.785);
+      const f8 = useT - 1; let f12 = f8 / 20; f12 = Math.min(1, (f12 * f12 + f12 * 2) / 3);
+      if (f12 > 0.1) mT(0, Math.sin((f8 - 0.1) * 1.3) * (f12 - 0.1) * 0.004, 0);
+      mT(0, 0, Math.max(0, f12) * 0.04); mS(1, 1, 1 + Math.max(0, f12) * 0.2); mY(-k * 45);
+    } else if (anim === "spear") {
+      armTransform(k, equip);
+      mT(k * -0.5, 0.7, 0.1); mX(-55); mY(k * 35.3); mZ(k * -9.785);
+      const f7 = useT - 1, f11 = Math.min(1, f7 / 10);
+      if (f11 > 0.1) mT(0, Math.sin((f7 - 0.1) * 1.3) * (f11 - 0.1) * 0.004, 0);
+      mT(0, 0, Math.max(0, f11) * 0.2); mS(1, 1, 1 + Math.max(0, f11) * 0.2); mY(-k * 45);
+    } else {
+      // The swing (applyItemArmTransform + applyItemArmAttackTransform).
+      mT(k * -0.4 * Math.sin(Math.sqrt(sw) * Math.PI), 0.2 * Math.sin(Math.sqrt(sw) * Math.PI * 2), -0.2 * Math.sin(sw * Math.PI));
+      armTransform(k, equip);
+      const f = Math.sin(sw * sw * Math.PI), f1 = Math.sin(Math.sqrt(sw) * Math.PI);
+      mY(k * (45 + f * -20)); mZ(k * f1 * -20); mX(f1 * -80); mY(k * -45);
     }
-    fp.matrix.copy(M4); fp.matrixWorldNeedsUpdate = true;
   }
   /* Walking: distance and bob amount, as Minecraft works them out per tick. */
   function fpWalk(x, z, dt, ground) {
@@ -2266,6 +2426,21 @@
   function addGlint(group) {
     const meshes = []; group.traverse(o => { if (o.isMesh && !o.userData.glint) meshes.push(o); });
     for (const o of meshes) { const gl = new THREE.Mesh(o.geometry, glintMaterial(o.userData.mask)); gl.userData.glint = true; gl.renderOrder = 4; o.add(gl); }
+  }
+  /* The whole shield texture (64×64: face, back, edges, handle) with the banner's colour and patterns over it. */
+  async function shieldTexture(x) {
+    const has = k => userPack && userPack.get(k);
+    const layers = x && (x.bc !== undefined || x.pt) ? [{ key: "entity/shield_base" }, { key: "entity/shield/base", tint: DYE_RGB[x.bc ?? 0] }, ...((x.pt || []).filter(([code]) => BANNER_CODES[code]).map(([code, col]) => ({ key: "entity/shield/" + BANNER_CODES[code], tint: DYE_RGB[col] })))] : [{ key: "entity/shield_base_nopattern" }];
+    const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+    let drew = false;
+    for (const l of layers) {
+      const img = has(l.key) ? await loadImg(l.key) : null; if (!img) continue;
+      const t = document.createElement("canvas"); t.width = t.height = 64; const tg = t.getContext("2d"); tg.imageSmoothingEnabled = false;
+      tg.drawImage(img, 0, 0, img.width, img.height, 0, 0, 64, 64);
+      if (l.tint != null) { tg.globalCompositeOperation = "multiply"; tg.fillStyle = "#" + l.tint.toString(16).padStart(6, "0"); tg.fillRect(0, 0, 64, 64); tg.globalCompositeOperation = "destination-in"; tg.drawImage(img, 0, 0, img.width, img.height, 0, 0, 64, 64); }
+      g.drawImage(t, 0, 0); drew = true;
+    }
+    return drew ? c : null;
   }
   /* A shield's face: plain, or its banner's colour and patterns over it. */
   async function shieldCanvas(x) {
@@ -2869,7 +3044,7 @@
     if (clockOff === null || off < clockOff) clockOff = off; else clockOff += 0.02; // follows slow clock drift
     wobble = wobble * 0.95 + (off - clockOff) * 0.05;
     snaps.push({ at: o.ts + clockOff, d: o }); if (snaps.length > 16) snaps.shift();
-    if (o.an) for (const [id, k] of o.an) { const a = avatars.get(id); if (!a) continue; if (k === "s") a.swingAt = performance.now(); else a.hurtAt = performance.now(); }
+    if (o.an) for (const [id, k] of o.an) { if (id === myId && k === "h") fpHurt(); const a = avatars.get(id); if (!a) continue; if (k === "s") a.swingAt = performance.now(); else a.hurtAt = performance.now(); }
   }
   function sample() {
     if (!snaps.length) return null;
@@ -2960,7 +3135,7 @@
           const hurt = a.hurtAt && now - a.hurtAt < 500, key = worldLight + (hurt ? "h" : "");
           if (key !== a.lit) { a.lit = key; a.mats.forEach(m => { if (m.map || !a.mob) m.color.setRGB(worldLight, (hurt ? 0.45 : 1) * worldLight, (hurt ? 0.45 : 1) * worldLight); }); }
         }
-        if (isMe) fpSetSkin(p.skin, p.team);
+        if (isMe) { fpSetSkin(p.skin, p.team, p.slim); fpSetOff(p.off); }
         if (a.slots) wearArmour(a, p.ar);
         // The other hand: shields, torches, maps… in the left hand, as worn.
         const leftHand = a.armL || (a.slots && a.slots.la && a.slots.la[0]);
@@ -3047,7 +3222,7 @@
   setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);
   const act = a => {
     send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12);
-    if (a === "ldown") { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
+    if (a === "ldown") { swingAt = performance.now(); fpSwing(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
   };
   const rightDown = () => { charge = performance.now(); rightHeld = true; act("rdown"); };
   const rightUp = () => { charge = -1; rightHeld = false; act("rup"); };
