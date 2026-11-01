@@ -294,7 +294,12 @@ class Session {
     const held = bot.heldItem;
     if (a === "ldown") {
       const entity = bot.entityAtCursor(3.5);
-      if (entity) { bot.attack(entity); return; }
+      if (entity) {
+        bot.attack(entity);
+        // A hit while running makes the server drop the run; DEPAR is still on, so take it up again.
+        if (bot.getControlState("sprint")) bot._client.write("entity_action", { entityId: bot.entity.id, actionId: 3, jumpBoost: 0 });
+        return;
+      }
       const block = !adventure && bot.blockAtCursor(5);
       if (block && block.name !== "air" && bot.canDigBlock(block)) { bot.dig(block, "ignore").catch(() => { }); this.digging = true; return; }
       bot.swingArm("right");

@@ -1240,15 +1240,13 @@
   const setRun = on => { me.run = on; $("bRun").classList.toggle("on", on); };
   stick.addEventListener("pointerdown", e => { stickId = e.pointerId; origin = { x: e.clientX, y: e.clientY }; knob.style.left = e.clientX + "px"; knob.style.top = e.clientY + "px"; knob.style.display = "block"; stick.setPointerCapture(e.pointerId); moveStick(e); });
   stick.addEventListener("pointermove", e => { if (e.pointerId === stickId) moveStick(e); });
-  // Letting go of the stick stops a sprint, as releasing W does in Minecraft.
-  const endStick = e => { if (e.pointerId !== stickId) return; stickId = null; knob.style.display = "none"; knob.firstChild.style.transform = ""; input.f = 0; input.s = 0; setRun(false); sendInput(true); };
+  const endStick = e => { if (e.pointerId !== stickId) return; stickId = null; knob.style.display = "none"; knob.firstChild.style.transform = ""; input.f = 0; input.s = 0; sendInput(true); };
   stick.addEventListener("pointerup", endStick); stick.addEventListener("pointercancel", endStick);
   function moveStick(e) {
     let dx = e.clientX - origin.x, dy = e.clientY - origin.y; const len = Math.hypot(dx, dy), max = 50;
     if (len > max) { dx = dx / len * max; dy = dy / len * max; }
     knob.firstChild.style.transform = "translate(" + dx + "px," + dy + "px)";
     input.f = len > 8 ? -dy / max : 0; input.s = len > 8 ? dx / max : 0;
-    if (input.f < 0.3) setRun(false);
     sendInput();
   }
   let lookId = null, lookLast = null;
@@ -1268,7 +1266,8 @@
   hold($("bLeft"), () => act("ldown"), () => act("lup"));
   hold($("bJump"), () => { input.jump = true; });
   hold($("bSneak"), () => { me.sneak = true; sendInput(true); }, () => { me.sneak = false; sendInput(true); });
-  // DEPAR is a switch: tap on, tap off (and it turns off by itself when you stop or walk backwards).
+  // DEPAR is a lock: tap on, tap off; nothing else turns it off. It runs whenever you push forward
+  // (standing still, walking backwards or crouching are just slower for a moment, then the run carries on).
   hold($("bRun"), () => { setRun(!me.run); sendInput(true); });
 
   const keys = new Set();
