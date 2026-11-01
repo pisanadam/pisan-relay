@@ -20,8 +20,8 @@ import android.webkit.WebViewClient;
 
 /* Pisan Lig as an app: the browser game from the relay, full screen, sideways, screen kept on. */
 public class Main extends Activity {
-    // The relay's addresses: the name first, the bare IP if the name does not resolve.
-    private static final String[] ADDRESSES = { "http://pisankus.serv.gs:25565/", "http://43.226.0.124:25565/" };
+    // The relay's addresses, tried in order: our deSEC name, server.pro's name, the bare IP.
+    private static final String[] ADDRESSES = { "http://pisanlig.pisankus.dedyn.io:25565/", "http://pisankus.serv.gs:25565/", "http://43.226.0.124:25565/" };
     private WebView web;
     private int address;
     private ValueCallback<Uri[]> picking;
@@ -42,13 +42,13 @@ public class Main extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setSupportZoom(false);
-        s.setUserAgentString(s.getUserAgentString() + " PisanLigApp/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " PisanLigApp/1.1");
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
-                String here = Uri.parse(ADDRESSES[address]).getHost();
-                if (here != null && here.equals(u.getHost())) return false;
+                if ("pisan".equals(u.getScheme())) { address = 0; view.loadUrl(ADDRESSES[0]); return true; }
+                for (String a : ADDRESSES) if (Uri.parse(a).getHost().equals(u.getHost())) return false;
                 // Other links (Microsoft sign-in, licences) open in the phone's browser.
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) { }
                 return true;
@@ -82,7 +82,7 @@ public class Main extends Activity {
 
     private static final String OFFLINE = "<html><body style='background:#222;color:#eee;font-family:sans-serif;text-align:center;padding-top:30vh'>"
         + "<h2>Pisan Lig köprüsüne ulaşılamadı</h2><p>İnternetini kontrol et; köprü kapalıysa biraz sonra dene.</p>"
-        + "<button style='font-size:20px;padding:10px 24px' onclick='location.href=\"" + "http://pisankus.serv.gs:25565/" + "\"'>Tekrar dene</button></body></html>";
+        + "<button style='font-size:20px;padding:10px 24px' onclick='location.href=\"pisan://retry\"'>Tekrar dene</button></body></html>";
 
     @Override
     protected void onActivityResult(int request, int result, Intent data) {

@@ -65,5 +65,5 @@ if ! kill -0 "$(cat relay.pid)" 2>/dev/null; then echo "Köprü başlatılamadı
 IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
 echo
 echo "Köprü arka planda çalışıyor (pid $(cat relay.pid)). Kayıtlar: $DIR/relay.log"
-echo "Adres: http://${IP:-?}:$PORT/"
+echo "Adres: http://${PUBLIC_NAME:-pisanlig.pisankus.dedyn.io}:$PORT/  (veya http://${IP:-?}:$PORT/)"
 echo "Durdurmak için: kill \$(cat $DIR/relay.pid)"
