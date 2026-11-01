@@ -872,7 +872,7 @@
     drowned: humanoid("entity/zombie/drowned", 64, true),
     skeleton: skeleton("entity/skeleton/skeleton"),
     stray: skeleton("entity/skeleton/stray"),
-    wither_skeleton: Object.assign(skeleton("entity/skeleton/wither_skeleton"), { h: 2.4 }),
+    wither_skeleton: Object.assign(skeleton("entity/skeleton/wither_skeleton", 1.2), { h: 2.4 }),
     creeper: { tex: "entity/creeper/creeper", tw: 64, th: 32, h: 1.7, parts: [
       { n: "head", at: [0, 6, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8]] },
       { n: "body", at: [0, 6, 0], b: [[16, 16, -4, 0, -2, 8, 12, 4]] },
@@ -926,6 +926,308 @@
     slime: { tex: "entity/slime/slime", tw: 64, th: 32, h: 0.52, size: "w", translucent: true, parts: [
       { n: "body", at: [0, 0, 0], b: [[0, 16, -3, 17, -3, 6, 6, 6], [0, 0, -4, 16, -4, 8, 8, 8]] }], legs: [] },
   };
+
+  // ---------- the rest of Minecraft's mobs, part by part ----------
+  const Q4 = (u, v, box, at, uvs) => ["rh", "lh", "rf", "lf"].map((n, k) => ({ n, at: at[k], b: [[...(uvs ? uvs[k] : [u, v]), ...box, 0, !uvs && k % 2 ? 1 : 0]] }));
+  const illager = (tex, crossed, h) => ({ tex, tw: 64, th: 64, h: h || 1.95, parts: [
+    { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -10, -4, 8, 10, 8], [32, 0, -4, -10, -4, 8, 12, 8, 0.45]] },
+    { n: "nose", parent: "head", at: [0, -2, 0], b: [[24, 0, -1, -1, -6, 2, 4, 2]] },
+    { n: "body", at: [0, 0, 0], b: [[16, 20, -4, 0, -3, 8, 12, 6], [0, 38, -4, 0, -3, 8, 20, 6, 0.5]] },
+    ...(crossed ? [{ n: "arms", at: [0, 3, -1], rot: [-0.75, 0, 0], b: [[44, 22, -8, -2, -2, 4, 8, 4], [44, 22, 4, -2, -2, 4, 8, 4, 0, 1], [40, 38, -4, 2, -2, 8, 4, 4]] }]
+      : [{ n: "ra", at: [-5, 2, 0], b: [[40, 46, -3, -2, -2, 4, 12, 4]] }, { n: "la", at: [5, 2, 0], b: [[40, 46, -1, -2, -2, 4, 12, 4, 0, 1]] }]),
+    { n: "rl", at: [-2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4]] },
+    { n: "ll", at: [2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4, 0, 1]] }],
+    legs: crossed ? [["rl", 1], ["ll", -1]] : [["rl", 1], ["ll", -1], ["ra", -1], ["la", 1]] });
+  const horse = tex => ({ tex, tw: 64, th: 64, h: 1.6, parts: [
+    { n: "body", at: [0, 11, 5], b: [[0, 32, -5, -8, -17, 10, 10, 22, 0.05]] },
+    { n: "head", at: [0, 4, -12], rot: [0.5236, 0, 0], b: [[0, 35, -2.05, -6, -2, 4, 12, 7], [0, 13, -3, -11, -2, 6, 5, 7], [56, 36, -1, -11, 5.01, 2, 16, 2], [0, 25, -2, -11, -7, 4, 5, 5], [19, 16, 0.55, -13, 4, 2, 3, 1], [19, 16, -2.55, -13, 4, 2, 3, 1, 0, 1]] },
+    { n: "tail", at: [0, 4, 11], rot: [0.5236, 0, 0], b: [[42, 36, -1.5, 0, 0, 3, 14, 4]] },
+    { n: "rh", at: [-4, 14, 7], b: [[48, 21, -1, -1.01, -1, 4, 11, 4]] }, { n: "lh", at: [4, 14, 7], b: [[48, 21, -3, -1.01, -1, 4, 11, 4, 0, 1]] },
+    { n: "rf", at: [-4, 14, -12], b: [[48, 21, -1, -1.01, -1.9, 4, 11, 4]] }, { n: "lf", at: [4, 14, -12], b: [[48, 21, -3, -1.01, -1.9, 4, 11, 4, 0, 1]] }], legs: QUAD_LEGS });
+  const cat = tex => ({ tex, tw: 64, th: 32, h: 0.7, parts: [
+    { n: "head", at: [0, 15, -9], b: [[0, 0, -2.5, -2, -3, 5, 4, 5], [0, 24, -1.5, 0, -4, 3, 2, 2], [0, 10, -2, -3, 0, 1, 1, 2], [6, 10, 1, -3, 0, 1, 1, 2]] },
+    { n: "body", at: [0, 12, -10], rot: [P2, 0, 0], b: [[20, 0, -2, 3, -8, 4, 16, 6]] },
+    { n: "tail", at: [0, 15, 8], rot: [0.9, 0, 0], b: [[0, 15, -0.5, 0, 0, 1, 8, 1]] },
+    { n: "tail2", at: [0, 20, 14], rot: [1.7, 0, 0], b: [[4, 15, -0.5, 0, 0, 1, 8, 1]] },
+    { n: "rh", at: [-1.1, 18, 5], b: [[8, 13, -1, 0, 1, 2, 6, 2]] }, { n: "lh", at: [1.1, 18, 5], b: [[8, 13, -1, 0, 1, 2, 6, 2]] },
+    { n: "rf", at: [-1.2, 14.1, -5], b: [[40, 0, -1, 0, 0, 2, 10, 2]] }, { n: "lf", at: [1.2, 14.1, -5], b: [[40, 0, -1, 0, 0, 2, 10, 2]] }], legs: QUAD_LEGS });
+  const piglin = (tex, armsUp) => ({ tex, tw: 64, th: 64, h: 1.95, parts: [
+    { n: "head", at: [0, 0, 0], b: [[0, 0, -5, -8, -4, 10, 8, 8], [31, 1, -2, -4, -5, 4, 4, 1], [2, 4, 2, -2, -5, 1, 2, 1], [2, 0, -3, -2, -5, 1, 2, 1]] },
+    { n: "lear", parent: "head", at: [4.5, -6, 0], rot: [0, 0, -0.5236], b: [[51, 6, 0, 0, -2, 1, 5, 4]] },
+    { n: "rear", parent: "head", at: [-4.5, -6, 0], rot: [0, 0, 0.5236], b: [[39, 6, -1, 0, -2, 1, 5, 4]] },
+    { n: "body", at: [0, 0, 0], b: [[16, 16, -4, 0, -2, 8, 12, 4], [16, 32, -4, 0, -2, 8, 12, 4, 0.25]] },
+    { n: "ra", at: [-5, 2, 0], rot: armsUp ? [-P2, 0, 0] : null, b: [[40, 16, -3, -2, -2, 4, 12, 4]] },
+    { n: "la", at: [5, 2, 0], rot: armsUp ? [-P2, 0, 0] : null, b: [[32, 48, -1, -2, -2, 4, 12, 4]] },
+    { n: "rl", at: [-1.9, 12, 0], b: [[0, 16, -2, 0, -2, 4, 12, 4]] }, { n: "ll", at: [1.9, 12, 0], b: [[16, 48, -2, 0, -2, 4, 12, 4]] }],
+    legs: armsUp ? [["rl", 1], ["ll", -1]] : [["rl", 1], ["ll", -1], ["ra", -1], ["la", 1]] });
+  const hoglin = tex => ({ tex, tw: 128, th: 64, h: 1.4, parts: [
+    { n: "body", at: [0, 7, 0], b: [[1, 1, -8, -7, -13, 16, 14, 26], [90, 33, 0, -14, -9, 0, 10, 19]] },
+    { n: "head", at: [0, 2, -12], rot: [0.8727, 0, 0], b: [[61, 1, -7, -3, -19, 14, 6, 19]] },
+    { n: "rear", parent: "head", at: [-6, -2, -3], rot: [0, 0, -0.6981], b: [[1, 1, -6, -1, -2, 6, 1, 4]] },
+    { n: "lear", parent: "head", at: [6, -2, -3], rot: [0, 0, 0.6981], b: [[1, 6, 0, -1, -2, 6, 1, 4]] },
+    { n: "rhorn", parent: "head", at: [-7, 2, -12], b: [[10, 13, -1, -11, -1, 2, 11, 2]] },
+    { n: "lhorn", parent: "head", at: [7, 2, -12], b: [[1, 13, -1, -11, -1, 2, 11, 2]] },
+    { n: "rf", at: [-4, 10, -8.5], b: [[66, 42, -3, 0, -3, 6, 14, 6]] }, { n: "lf", at: [4, 10, -8.5], b: [[41, 42, -3, 0, -3, 6, 14, 6]] },
+    { n: "rh", at: [-5, 13, 10], b: [[21, 45, -2.5, 0, -2.5, 5, 11, 5]] }, { n: "lh", at: [5, 13, 10], b: [[0, 45, -2.5, 0, -2.5, 5, 11, 5]] }], legs: QUAD_LEGS });
+  const llama = tex => ({ tex, tw: 128, th: 64, h: 1.87, parts: [
+    { n: "head", at: [0, 7, -6], b: [[0, 0, -2, -14, -10, 4, 4, 9], [0, 14, -4, -16, -6, 8, 18, 6], [17, 0, -4, -19, -4, 3, 3, 2], [17, 0, 1, -19, -4, 3, 3, 2]] },
+    { n: "body", at: [0, 5, 2], rot: [P2, 0, 0], b: [[29, 0, -6, -10, -7, 12, 18, 10]] },
+    ...Q4(29, 29, [-2, 0, -2, 4, 14, 4], [[-3.5, 10, 6], [3.5, 10, 6], [-3.5, 10, -5], [3.5, 10, -5]])], legs: QUAD_LEGS });
+  const squid = tex => {
+    const parts = [{ n: "body", at: [0, 8, 0], b: [[0, 0, -6, -8, -6, 12, 16, 12]] }];
+    for (let i = 0; i < 8; i++) { const a = i * Math.PI * 2 / 8; parts.push({ n: "t" + i, at: [Math.cos(a) * 5, 15, Math.sin(a) * 5], rot: [0, -a + P2, 0], b: [[48, 0, -1, 0, -1, 2, 18, 2]] }); }
+    return { tex, tw: 64, th: 32, h: 0.8, hover: 0.1, parts, legs: [], flap: [...Array(8).keys()].map(i => ["t" + i, "x", 0.25, 0.4]) };
+  };
+  const segments = (tex, sizes, uvs, h) => {
+    let f = -3.5; const parts = [];
+    sizes.forEach(([w, hh, d], i) => { parts.push({ n: "s" + i, at: [0, 24 - hh, f + d / 2], b: [[...uvs[i], -w / 2, 0, -d / 2, w, hh, d]] }); f += d; });
+    return { tex, tw: 64, th: 32, h, parts, legs: [], flap: sizes.map((_, i) => ["s" + i, "y", 0.12, 1 + i * 0.15]) };
+  };
+  const guardian = (tex, scale) => ({ tex, tw: 64, th: 64, h: 0.85, scale, hover: 0.08, parts: [
+    { n: "head", at: [0, 0, 0], b: [[0, 0, -6, 10, -8, 12, 12, 16], [0, 28, -8, 10, -6, 2, 12, 12], [0, 28, 6, 10, -6, 2, 12, 12, 0, 1], [16, 40, -6, 8, -6, 12, 2, 12], [16, 40, -6, 22, -6, 12, 2, 12], [8, 0, -1, 15, -8.25, 2, 2, 1]] },
+    { n: "tail", at: [-2, 14, 7], b: [[40, 0, 0, 0, 0, 4, 4, 8]] },
+    { n: "tail2", parent: "tail", at: [1.5, 0.5, 14], b: [[0, 54, 0, 0, 0, 3, 3, 7]] },
+    { n: "tail3", parent: "tail2", at: [0.5, 0.5, 6], b: [[41, 32, 0, 0, 0, 2, 2, 6], [25, 19, 1, -4.5, 3, 1, 9, 9]] }], legs: [], flap: [["tail", "y", 0.15, 0.4], ["tail2", "y", 0.2, 0.4]] });
+  const fish = (tex, tw, th, parts, h) => ({ tex, tw, th, h, parts, legs: [], flap: [["tail", "y", 0.35, 1.2]] });
+  Object.assign(MOBS, {
+    giant: Object.assign(humanoid("entity/zombie/zombie", 64, true), { h: 12, scale: 6 }),
+    zombie_villager: { tex: "entity/zombie_villager/zombie_villager", tw: 64, th: 64, h: 1.95, parts: [
+      { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -10, -4, 8, 10, 8], [24, 0, -1, -3, -6, 2, 4, 2]] },
+      { n: "body", at: [0, 0, 0], b: [[16, 20, -4, 0, -3, 8, 12, 6], [0, 38, -4, 0, -3, 8, 20, 6, 0.05]] },
+      { n: "ra", at: [-5, 2, 0], rot: [-P2, 0, 0], b: [[44, 22, -3, -2, -2, 4, 12, 4]] }, { n: "la", at: [5, 2, 0], rot: [-P2, 0, 0], b: [[44, 22, -1, -2, -2, 4, 12, 4, 0, 1]] },
+      { n: "rl", at: [-2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4]] }, { n: "ll", at: [2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4, 0, 1]] }], legs: [["rl", 1], ["ll", -1]] },
+    wandering_trader: Object.assign({}, MOBS.villager, { tex: "entity/wandering_trader" }),
+    pillager: illager("entity/illager/pillager", false),
+    vindicator: illager("entity/illager/vindicator", false),
+    evoker: illager("entity/illager/evoker", true),
+    illusioner: illager("entity/illager/illusioner", true),
+    witch: { tex: "entity/witch", tw: 64, th: 128, h: 1.95, parts: [
+      { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -10, -4, 8, 10, 8]] },
+      { n: "nose", parent: "head", at: [0, -2, 0], b: [[24, 0, -1, -1, -6, 2, 4, 2]] },
+      { n: "hat", parent: "head", at: [-5, -10.03, -5], b: [[0, 64, 0, 0, 0, 10, 2, 10]] },
+      { n: "hat2", parent: "hat", at: [1.75, -4, 2], rot: [-0.0524, 0, 0.0262], b: [[0, 76, 0, 0, 0, 7, 4, 7]] },
+      { n: "hat3", parent: "hat2", at: [1.75, -4, 2], rot: [-0.1047, 0, 0.0524], b: [[0, 87, 0, 0, 0, 4, 4, 4]] },
+      { n: "hat4", parent: "hat3", at: [1.75, -2, 2], rot: [-0.2094, 0, 0.1047], b: [[0, 95, 0, 0, 0, 1, 2, 1, 0.25]] },
+      { n: "body", at: [0, 0, 0], b: [[16, 20, -4, 0, -3, 8, 12, 6], [0, 38, -4, 0, -3, 8, 18, 6, 0.5]] },
+      { n: "arms", at: [0, 3, -1], rot: [-0.75, 0, 0], b: [[44, 22, -8, -2, -2, 4, 8, 4], [44, 22, 4, -2, -2, 4, 8, 4, 0, 1], [40, 38, -4, 2, -2, 8, 4, 4]] },
+      { n: "rl", at: [-2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4]] }, { n: "ll", at: [2, 12, 0], b: [[0, 22, -2, 0, -2, 4, 12, 4, 0, 1]] }], legs: [["rl", 1], ["ll", -1]] },
+    piglin: piglin("entity/piglin/piglin"),
+    piglin_brute: piglin("entity/piglin/piglin_brute"),
+    zombified_piglin: piglin("entity/piglin/zombified_piglin", true),
+    hoglin: hoglin("entity/hoglin/hoglin"),
+    zoglin: hoglin("entity/hoglin/zoglin"),
+    horse: horse("entity/horse/horse_brown"),
+    donkey: horse("entity/horse/donkey"),
+    mule: horse("entity/horse/mule"),
+    skeleton_horse: horse("entity/horse/horse_skeleton"),
+    zombie_horse: horse("entity/horse/horse_zombie"),
+    llama: llama("entity/llama/creamy"),
+    trader_llama: llama("entity/llama/creamy"),
+    cat: cat("entity/cat/tabby"),
+    ocelot: cat("entity/cat/ocelot"),
+    camel: { tex: "entity/camel/camel", tw: 128, th: 128, h: 2.375, parts: [
+      { n: "body", at: [0, 4, 9.5], b: [[0, 25, -7.5, -12, -23.5, 15, 12, 27], [74, 0, -4.5, -17, -15.5, 9, 5, 11]] },
+      { n: "tail", parent: "body", at: [0, -9, 3.5], b: [[122, 0, -1.5, 0, 0, 3, 14, 0]] },
+      { n: "head", at: [0, -3, -19.5], b: [[60, 24, -3.5, -7, -15, 7, 8, 19], [21, 0, -3.5, -21, -15, 7, 14, 7], [50, 0, -2.5, -21, -21, 5, 5, 6]] },
+      { n: "lear", parent: "head", at: [3.5, -20, -10.5], b: [[45, 0, -0.5, 0.5, -1, 3, 1, 2]] },
+      { n: "rear", parent: "head", at: [-3.5, -20, -10.5], b: [[67, 0, -2.5, 0.5, -1, 3, 1, 2]] },
+      ...Q4(0, 0, [-2.5, 2, -2.5, 5, 21, 5], [[-4.9, 1, 9.5], [4.9, 1, 9.5], [-4.9, 1, -10.5], [4.9, 1, -10.5]], [[94, 16], [58, 16], [0, 0], [0, 26]])], legs: QUAD_LEGS },
+    bee: { tex: "entity/bee/bee", tw: 64, th: 64, h: 0.6, hover: 0.08, parts: [
+      { n: "bone", at: [0, 19, 0], b: [[0, 0, -3.5, -4, -5, 7, 7, 10], [26, 7, 0, -1, 5, 0, 1, 2]] },
+      { n: "lant", parent: "bone", at: [0, -2, -5], b: [[2, 0, 1.5, -2, -3, 1, 2, 3]] },
+      { n: "rant", parent: "bone", at: [0, -2, -5], b: [[2, 3, -2.5, -2, -3, 1, 2, 3]] },
+      { n: "rw", parent: "bone", at: [-1.5, -4, -3], rot: [0, -0.2618, 0], b: [[0, 18, -9, 0, 0, 9, 0, 6]] },
+      { n: "lw", parent: "bone", at: [1.5, -4, -3], rot: [0, 0.2618, 0], b: [[0, 18, 0, 0, 0, 9, 0, 6, 0, 1]] },
+      { n: "fl", parent: "bone", at: [1.5, 3, -2], b: [[26, 1, -5, 0, 0, 7, 2, 0]] },
+      { n: "ml", parent: "bone", at: [1.5, 3, 0], b: [[26, 3, -5, 0, 0, 7, 2, 0]] },
+      { n: "bl", parent: "bone", at: [1.5, 3, 2], b: [[26, 5, -5, 0, 0, 7, 2, 0]] }], legs: [], flap: [["rw", "z", 0.9, 4], ["lw", "z", -0.9, 4]] },
+    parrot: { tex: "entity/parrot/parrot_red_blue", tw: 32, th: 32, h: 0.9, parts: [
+      { n: "body", at: [0, 16.5, -3], rot: [0.4937, 0, 0], b: [[2, 8, -1.5, 0, -1.5, 3, 6, 3]] },
+      { n: "tail", at: [0, 21.07, 1.16], rot: [1.015, 0, 0], b: [[22, 1, -1.5, -1, -1, 3, 4, 1]] },
+      { n: "lw", at: [1.5, 16.94, -2.76], rot: [-0.6981, -Math.PI, 0], b: [[19, 8, -0.5, 0, -1.5, 1, 5, 3]] },
+      { n: "rw", at: [-1.5, 16.94, -2.76], rot: [-0.6981, -Math.PI, 0], b: [[19, 8, -0.5, 0, -1.5, 1, 5, 3]] },
+      { n: "head", at: [0, 15.69, -2.76], b: [[2, 2, -1, -1.5, -1, 2, 3, 2], [10, 0, -1, -0.5, -2, 2, 1, 4], [11, 7, -0.5, -1.7, -2.95, 1, 2, 1], [16, 7, -0.5, -1.75, -2.95, 1, 2, 1, -0.1]] },
+      { n: "feather", parent: "head", at: [0, -2.15, 0.15], rot: [-0.2214, 0, 0], b: [[2, 18, 0, -4, -2, 0, 5, 4]] },
+      { n: "rl", at: [-1, 22, -1.05], b: [[14, 18, -0.5, 0, -0.5, 1, 2, 1]] }, { n: "ll", at: [1, 22, -1.05], b: [[14, 18, -0.5, 0, -0.5, 1, 2, 1]] }], legs: [["rl", 1], ["ll", -1]] },
+    rabbit: { tex: "entity/rabbit/brown", tw: 64, th: 32, h: 0.5, parts: [
+      { n: "rf2", at: [-3, 17.5, 3.7], b: [[26, 24, -1, 5.5, -3.7, 2, 1, 7]] }, { n: "lf2", at: [3, 17.5, 3.7], b: [[8, 24, -1, 5.5, -3.7, 2, 1, 7]] },
+      { n: "rh", at: [-3, 17.5, 3.7], rot: [-0.3491, 0, 0], b: [[30, 15, -1, 0, 0, 2, 4, 5]] }, { n: "lh", at: [3, 17.5, 3.7], rot: [-0.3491, 0, 0], b: [[16, 15, -1, 0, 0, 2, 4, 5]] },
+      { n: "body", at: [0, 19, 8], rot: [-0.3491, 0, 0], b: [[0, 0, -3, -2, -10, 6, 5, 10]] },
+      { n: "rf", at: [-3, 17, -1], rot: [-0.1745, 0, 0], b: [[8, 15, -1, 0, -1, 2, 7, 2]] }, { n: "lf", at: [3, 17, -1], rot: [-0.1745, 0, 0], b: [[0, 15, -1, 0, -1, 2, 7, 2]] },
+      { n: "head", at: [0, 16, -1], b: [[32, 0, -2.5, -4, -5, 5, 4, 5], [32, 9, -0.5, -2.5, -5.5, 1, 1, 1]] },
+      { n: "rear", parent: "head", at: [0, 0, 0], rot: [0, -0.2618, 0], b: [[52, 0, -2.5, -9, -1, 2, 5, 1]] },
+      { n: "lear", parent: "head", at: [0, 0, 0], rot: [0, 0.2618, 0], b: [[58, 0, 0.5, -9, -1, 2, 5, 1]] },
+      { n: "tail", at: [0, 20, 7], rot: [-0.3491, 0, 0], b: [[52, 6, -1.5, -1.5, 0, 3, 3, 2]] }], legs: [["rf", 1], ["lf", 1], ["rh", -1], ["lh", -1]] },
+    fox: { tex: "entity/fox/fox", tw: 48, th: 32, h: 0.7, parts: [
+      { n: "head", at: [-1, 16.5, -3], b: [[1, 5, -3, -2, -5, 8, 6, 6], [8, 1, -3, -4, -4, 2, 2, 1], [15, 1, 3, -4, -4, 2, 2, 1], [6, 18, -1, 2.01, -8, 4, 2, 3]] },
+      { n: "body", at: [0, 16, -6], rot: [P2, 0, 0], b: [[24, 15, -3, 3.999, -3.5, 6, 11, 6]] },
+      { n: "tail", parent: "body", at: [-4, 15 - 16, -1 + 6], rot: [-0.05, 0, 0], b: [[30, 0, 2, 0, -1, 4, 9, 5]] },
+      ...Q4(13, 24, [2, 0.5, -1, 2, 6, 2], [[-5, 17.5, 7], [-1, 17.5, 7], [-5, 17.5, 0], [-1, 17.5, 0]], [[4, 24], [13, 24], [4, 24], [13, 24]])], legs: QUAD_LEGS },
+    polar_bear: { tex: "entity/bear/polarbear", tw: 128, th: 64, h: 1.4, parts: [
+      { n: "head", at: [0, 10, -16], b: [[0, 0, -3.5, -3, -3, 7, 7, 7], [0, 44, -2.5, 1, -6, 5, 3, 3], [26, 0, -4.5, -4, -1, 2, 2, 1], [26, 0, 2.5, -4, -1, 2, 2, 1, 0, 1]] },
+      { n: "body", at: [-2, 9, 12], rot: [P2, 0, 0], b: [[0, 19, -5, -13, -7, 14, 14, 11], [39, 0, -4, -25, -7, 12, 12, 10]] },
+      ...Q4(50, 22, [-2, 0, -2, 4, 10, 8], [[-4.5, 14, 6], [4.5, 14, 6], [-3.5, 14, -8], [3.5, 14, -8]], [[50, 22], [50, 22], [50, 40], [50, 40]])], legs: QUAD_LEGS },
+    panda: { tex: "entity/panda/panda", tw: 64, th: 64, h: 1.25, parts: [
+      { n: "head", at: [0, 11.5, -17], b: [[0, 6, -6.5, -5, -4, 13, 10, 9], [45, 16, -3.5, 0, -6, 7, 5, 2], [52, 25, -8.5, -8, -1, 5, 4, 1], [52, 25, 3.5, -8, -1, 5, 4, 1]] },
+      { n: "body", at: [0, 10, 0], rot: [P2, 0, 0], b: [[0, 25, -9.5, -13, -6.5, 19, 26, 13]] },
+      ...Q4(40, 0, [-3, 0, -3, 6, 9, 6], [[-5.5, 15, 9], [5.5, 15, 9], [-5.5, 15, -9], [5.5, 15, -9]], [[40, 0], [40, 0], [40, 0], [40, 0]])], legs: QUAD_LEGS },
+    goat: { tex: "entity/goat/goat", tw: 64, th: 64, h: 1.3, parts: [
+      { n: "body", at: [0, 24, 0], b: [[1, 1, -4, -17, -7, 9, 11, 16], [0, 28, -5, -18, -8, 11, 14, 11]] },
+      { n: "head", at: [1, 14, 0], rot: [0.9599, 0, 0], b: [[2, 61, -6, -11, -10, 5, 2, 2, 0, 1], [2, 61, 2, -11, -10, 5, 2, 2], [23, 52, -0.5, -3, -14, 0, 7, 5], [12, 55, -0.01, -16, -10, 2, 7, 2], [12, 55, -2.99, -16, -10, 2, 7, 2], [34, 46, -3, -4, -8, 5, 7, 10]] },
+      ...Q4(49, 2, [0, 4, 0, 3, 6, 3], [[-3, 18, 4], [1, 18, 4], [-3, 14, -6], [1, 14, -6]], [[35, 2], [49, 2], [35, 29], [49, 29]])], legs: QUAD_LEGS },
+    turtle: { tex: "entity/turtle/big_sea_turtle", tw: 128, th: 64, h: 0.4, parts: [
+      { n: "head", at: [0, 19, -10], b: [[3, 0, -3, -1, -3, 6, 5, 6]] },
+      { n: "body", at: [0, 11, -10], rot: [P2, 0, 0], b: [[7, 37, -9.5, 3, -10, 19, 20, 6], [31, 1, -5.5, 3, -13, 11, 18, 3]] },
+      { n: "rh", at: [-3.5, 22, 11], b: [[1, 23, -2, 0, 0, 4, 1, 10]] }, { n: "lh", at: [3.5, 22, 11], b: [[1, 12, -2, 0, 0, 4, 1, 10]] },
+      { n: "rf", at: [-5, 21, -4], b: [[27, 30, -13, 0, -2, 13, 1, 5]] }, { n: "lf", at: [5, 21, -4], b: [[27, 24, 0, 0, -2, 13, 1, 5]] }], legs: [], flap: [["rf", "y", 0.4, 0.5], ["lf", "y", -0.4, 0.5]] },
+    squid: squid("entity/squid/squid"),
+    glow_squid: squid("entity/squid/glow_squid"),
+    dolphin: { tex: "entity/dolphin", tw: 64, th: 64, h: 0.6, parts: [
+      { n: "body", at: [0, 22, -5], b: [[22, 0, -4, -7, 0, 8, 7, 13]] },
+      { n: "fin", parent: "body", at: [0, -7, 5], rot: [1.0472, 0, 0], b: [[51, 0, -0.5, 0, 8, 1, 4, 5]] },
+      { n: "lfl", parent: "body", at: [2, -2, 4], rot: [1.0472, 0, 2.0944], b: [[48, 20, -0.5, -4, 0, 1, 4, 7, 0, 1]] },
+      { n: "rfl", parent: "body", at: [-2, -2, 4], rot: [1.0472, 0, -2.0944], b: [[48, 20, -0.5, -4, 0, 1, 4, 7]] },
+      { n: "tail", parent: "body", at: [0, -2.5, 11], rot: [-0.1047, 0, 0], b: [[0, 19, -2, -2.5, 0, 4, 5, 11]] },
+      { n: "tailfin", parent: "tail", at: [0, 0, 9], b: [[19, 20, -5, -0.5, 0, 10, 1, 6]] },
+      { n: "head", parent: "body", at: [0, -4, -3], b: [[0, 0, -4, -3, -3, 8, 7, 6], [0, 13, -1, 2, -7, 2, 2, 4]] }], legs: [], flap: [["tail", "x", 0.2, 0.6]] },
+    cod: fish("entity/fish/cod", 32, 32, [
+      { n: "body", at: [0, 22, 0], b: [[0, 0, -1, -2, 0, 2, 4, 7]] },
+      { n: "head", at: [0, 22, 0], b: [[11, 0, -1, -2, -3, 2, 4, 3], [0, 0, -1, -2, -4, 2, 3, 1]] },
+      { n: "tail", at: [0, 22, 7], b: [[22, 3, 0, -2, 0, 0, 4, 4]] }], 0.3),
+    salmon: fish("entity/fish/salmon", 32, 32, [
+      { n: "body", at: [0, 20, 0], b: [[0, 0, -1.5, -2.5, 0, 3, 5, 8]] },
+      { n: "back", at: [0, 20, 8], b: [[0, 13, -1.5, -2.5, 0, 3, 5, 8]] },
+      { n: "head", at: [0, 20, 0], b: [[22, 0, -1, -2, -3, 2, 4, 3]] },
+      { n: "tail", parent: "back", at: [0, 0, 8], b: [[20, 10, 0, -2.5, 0, 0, 5, 6]] }], 0.4),
+    tropical_fish: fish("entity/fish/tropical_a", 32, 32, [
+      { n: "body", at: [0, 22, 0], b: [[0, 0, -1, -1.5, -3, 2, 3, 6]] },
+      { n: "tail", at: [0, 22, 3], b: [[22, -6, 0, -1.5, 0, 0, 3, 6]] }], 0.4),
+    pufferfish: fish("entity/fish/pufferfish", 32, 32, [
+      { n: "body", at: [0, 22, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8]] },
+      { n: "tail", at: [0, 22, 0], b: [] }], 0.7),
+    tadpole: fish("entity/tadpole/tadpole", 16, 16, [
+      { n: "body", at: [0, 22, -3], b: [[0, 0, -1.5, -1, 0, 3, 2, 3]] },
+      { n: "tail", at: [0, 22, 0], b: [[0, 0, 0, -1, 0, 0, 2, 7]] }], 0.3),
+    axolotl: { tex: "entity/axolotl/axolotl_lucy", tw: 64, th: 64, h: 0.42, parts: [
+      { n: "body", at: [0, 20, 5], b: [[0, 11, -4, -2, -9, 8, 4, 10], [2, 17, 0, -3, -8, 0, 5, 9]] },
+      { n: "head", parent: "body", at: [0, 0, -9], b: [[0, 1, -4, -3, -5, 8, 5, 5]] },
+      { n: "tail", parent: "body", at: [0, 0, 1], b: [[2, 19, 0, -3, 0, 0, 5, 12]] },
+      { n: "rh", parent: "body", at: [-3.5, 1, -1], b: [[2, 13, -2, 0, 0, 3, 5, 0]] }, { n: "lh", parent: "body", at: [3.5, 1, -1], b: [[2, 13, -1, 0, 0, 3, 5, 0]] },
+      { n: "rf", parent: "body", at: [-3.5, 1, -8], b: [[2, 13, -2, 0, 0, 3, 5, 0]] }, { n: "lf", parent: "body", at: [3.5, 1, -8], b: [[2, 13, -1, 0, 0, 3, 5, 0]] }], legs: QUAD_LEGS, flap: [["tail", "y", 0.3, 0.8]] },
+    frog: { tex: "entity/frog/temperate_frog", tw: 48, th: 48, h: 0.55, parts: [
+      { n: "body", at: [0, 22, 4], b: [[3, 1, -3.5, -2, -8, 7, 3, 9], [23, 22, -3.5, -1, -8, 7, 0, 9]] },
+      { n: "head", parent: "body", at: [0, -2, -1], b: [[23, 13, -3.5, -1, -7, 7, 0, 9], [0, 13, -3.5, -2, -7, 7, 3, 9]] },
+      { n: "reye", parent: "head", at: [-2, -3, -3], b: [[0, 0, -1.5, -1, -1.5, 3, 2, 3]] }, { n: "leye", parent: "head", at: [2, -3, -3], b: [[0, 5, -1.5, -1, -1.5, 3, 2, 3]] },
+      { n: "lf", parent: "body", at: [4, -1, -6.5], b: [[0, 32, -1, 0, -1, 2, 3, 3]] }, { n: "rf", parent: "body", at: [-4, -1, -6.5], b: [[0, 38, -1, 0, -1, 2, 3, 3]] },
+      { n: "lh", at: [3.5, 21, 4], b: [[14, 25, -1, 0, -2, 3, 3, 4]] }, { n: "rh", at: [-3.5, 21, 4], b: [[0, 25, -2, 0, -2, 3, 3, 4]] }], legs: QUAD_LEGS },
+    bat: { tex: "entity/bat", tw: 64, th: 64, h: 0.9, scale: 0.35, hover: 0.1, parts: [
+      { n: "head", at: [0, 0, 0], b: [[0, 0, -3, -3, -3, 6, 6, 6], [24, 0, -4, -6, -2, 3, 4, 1], [24, 0, 1, -6, -2, 3, 4, 1, 0, 1]] },
+      { n: "body", at: [0, 0, 0], b: [[0, 16, -3, 4, -3, 6, 12, 6], [0, 34, -5, 16, 0, 10, 6, 1]] },
+      { n: "rw", parent: "body", at: [0, 0, 0], b: [[42, 0, -12, 1, 1.5, 10, 16, 1]] },
+      { n: "rw2", parent: "rw", at: [-12, 1, 1.5], b: [[24, 16, -8, 1, 0, 8, 12, 1]] },
+      { n: "lw", parent: "body", at: [0, 0, 0], b: [[42, 0, 2, 1, 1.5, 10, 16, 1, 0, 1]] },
+      { n: "lw2", parent: "lw", at: [12, 1, 1.5], b: [[24, 16, 0, 1, 0, 8, 12, 1, 0, 1]] }], legs: [], flap: [["rw", "y", 0.9, 3], ["lw", "y", -0.9, 3]] },
+    phantom: { tex: "entity/phantom", tw: 64, th: 64, h: 0.5, hover: 0.15, parts: [
+      { n: "body", at: [0, 20, 0], rot: [-0.1, 0, 0], b: [[0, 8, -3, -2, -8, 5, 3, 9]] },
+      { n: "lw", parent: "body", at: [2, -2, -8], rot: [0, 0, 0.1], b: [[23, 12, 0, 0, 0, 6, 2, 9]] },
+      { n: "lw2", parent: "lw", at: [6, 0, 0], rot: [0, 0, 0.1], b: [[16, 24, 0, 0, 0, 13, 1, 9]] },
+      { n: "rw", parent: "body", at: [-3, -2, -8], rot: [0, 0, -0.1], b: [[23, 12, -6, 0, 0, 6, 2, 9, 0, 1]] },
+      { n: "rw2", parent: "rw", at: [-6, 0, 0], rot: [0, 0, -0.1], b: [[16, 24, -13, 0, 0, 13, 1, 9, 0, 1]] },
+      { n: "head", parent: "body", at: [0, 1, -7], rot: [0.2, 0, 0], b: [[0, 0, -4, -2, -5, 7, 3, 5]] },
+      { n: "tail", parent: "body", at: [0, -2, 1], b: [[3, 20, -2, 0, 0, 3, 2, 6]] },
+      { n: "tail2", parent: "tail", at: [0, 0.5, 6], b: [[4, 29, -1, 0, 0, 1, 1, 6]] }], legs: [], flap: [["lw", "z", 0.5, 1.2], ["rw", "z", -0.5, 1.2]] },
+    vex: { tex: "entity/illager/vex", tw: 32, th: 32, h: 0.8, hover: 0.1, parts: [
+      { n: "head", at: [0, 19, 0], b: [[0, 0, -2.5, -5, -2.5, 5, 5, 5]] },
+      { n: "body", at: [0, 19, 0], b: [[0, 10, -1.5, 0, -1, 3, 4, 2], [0, 16, -1.5, 1, -1, 3, 5, 2, -0.2]] },
+      { n: "ra", at: [-1.75, 19.25, 0], b: [[23, 0, -1.25, -0.5, -1, 2, 4, 2, -0.1]] }, { n: "la", at: [1.75, 19.25, 0], b: [[23, 6, -0.75, -0.5, -1, 2, 4, 2, -0.1]] },
+      { n: "lw", at: [0.5, 20, 1], rot: [0, 0.7, 0], b: [[16, 14, 0, 0, 0, 0, 5, 8, 0, 1]] }, { n: "rw", at: [-0.5, 20, 1], rot: [0, -0.7, 0], b: [[16, 14, 0, 0, 0, 0, 5, 8]] }], legs: [], flap: [["lw", "y", 0.4, 2], ["rw", "y", -0.4, 2]] },
+    allay: { tex: "entity/allay/allay", tw: 32, th: 32, h: 0.6, hover: 0.1, parts: [
+      { n: "head", at: [0, 20, 0], b: [[0, 0, -2.5, -5, -2.5, 5, 5, 5]] },
+      { n: "body", at: [0, 20, 0], b: [[0, 10, -1.5, 0, -1, 3, 4, 2], [0, 16, -1.5, 0, -1, 3, 5, 2, -0.2]] },
+      { n: "ra", at: [-1.75, 20.5, 0], b: [[23, 0, -0.75, -0.5, -1, 1, 4, 2, -0.01]] }, { n: "la", at: [1.75, 20.5, 0], b: [[23, 6, -0.25, -0.5, -1, 1, 4, 2, -0.01]] },
+      { n: "rw", at: [-0.5, 21, 1], rot: [0, -0.7, 0], b: [[16, 14, 0, 1, 0, 0, 5, 8]] }, { n: "lw", at: [0.5, 21, 1], rot: [0, 0.7, 0], b: [[16, 14, 0, 1, 0, 0, 5, 8, 0, 1]] }], legs: [], flap: [["lw", "y", 0.4, 2], ["rw", "y", -0.4, 2]] },
+    blaze: (() => {
+      const rods = [];
+      for (let i = 0; i < 12; i++) {
+        const ring = Math.floor(i / 4), a = (i % 4) * Math.PI / 2 + ring * Math.PI / 4, r = [9, 7, 5][ring], y = [-2, 2, 11][ring] + 4;
+        rods.push([0, 16, Math.cos(a) * r - 1, y, Math.sin(a) * r - 1, 2, 8, 2]);
+      }
+      return { tex: "entity/blaze", tw: 64, th: 32, h: 1.8, hover: 0.12, parts: [{ n: "head", at: [0, 0, 0], b: [[0, 0, -4, -4, -4, 8, 8, 8]] }, { n: "rods", at: [0, 0, 0], b: rods }], legs: [], spin: ["rods"] };
+    })(),
+    ghast: (() => {
+      const parts = [{ n: "body", at: [0, 17.6, 0], b: [[0, 0, -8, -8, -8, 16, 16, 16]] }];
+      const r = rng(1660);
+      for (let i = 0; i < 9; i++) { const x = (((i % 3) - (Math.floor(i / 3) % 2) * 0.5 + 0.25) / 2 * 2 - 1) * 5, z = ((Math.floor(i / 3)) / 2 * 2 - 1) * 5; parts.push({ n: "t" + i, at: [x, 24.6, z], b: [[0, 0, -1, 0, -1, 2, Math.floor(r() * 7) + 8, 2]] }); }
+      return { tex: "entity/ghast/ghast", tw: 64, th: 32, h: 4, scale: 4.5, hover: 0.3, parts, legs: [], flap: [...Array(9).keys()].map(i => ["t" + i, "x", 0.2, 0.3 + i * 0.05]) };
+    })(),
+    magma_cube: { tex: "entity/slime/magmacube", tw: 64, th: 32, h: 0.52, size: "w", parts: [
+      { n: "body", at: [0, 0, 0], b: [...[...Array(8).keys()].map(i => { const [u, v] = i === 2 ? [24, 10] : i === 3 ? [24, 19] : [0, i]; return [u, v, -4, 16 + i, -4, 8, 1, 8]; }), [0, 16, -2, 18, -2, 4, 4, 4]] }], legs: [] },
+    endermite: segments("entity/endermite", [[4, 3, 2], [6, 4, 5], [3, 3, 1], [1, 2, 1]], [[0, 0], [0, 5], [0, 14], [0, 18]], 0.3),
+    silverfish: segments("entity/silverfish", [[3, 2, 2], [4, 3, 2], [6, 4, 3], [3, 3, 3], [2, 2, 3], [2, 1, 2], [1, 1, 2]], [[0, 0], [0, 4], [0, 9], [0, 16], [0, 22], [11, 0], [13, 4]], 0.3),
+    guardian: guardian("entity/guardian"),
+    elder_guardian: Object.assign(guardian("entity/guardian_elder", 2.35), { h: 1.9975 }),
+    shulker: { tex: "entity/shulker/shulker", tw: 64, th: 64, h: 1, parts: [
+      { n: "base", at: [0, 24, 0], b: [[0, 28, -8, -8, -8, 16, 8, 16]] },
+      { n: "lid", at: [0, 24, 0], b: [[0, 0, -8, -16, -8, 16, 12, 16]] },
+      { n: "head", at: [0, 12, 0], b: [[0, 52, -3, 0, -3, 6, 6, 6]] }], legs: [] },
+    snow_golem: { tex: "entity/snow_golem", tw: 64, th: 64, h: 1.9, parts: [
+      { n: "head", at: [0, 4, 0], b: [[0, 0, -4, -8, -4, 8, 8, 8, -0.5]] },
+      { n: "upper", at: [0, 13, 0], b: [[0, 16, -5, -10, -5, 10, 10, 10, -0.5]] },
+      { n: "lower", at: [0, 24, 0], b: [[0, 36, -6, -12, -6, 12, 12, 12, -0.5]] },
+      { n: "la", at: [5, 6, 1], rot: [0, 0, 1], b: [[32, 0, -1, 0, -1, 12, 2, 2, -0.5]] },
+      { n: "ra", at: [-5, 6, -1], rot: [0, Math.PI, -1], b: [[32, 0, -1, 0, -1, 12, 2, 2, -0.5]] }], legs: [] },
+    strider: { tex: "entity/strider/strider", tw: 64, th: 128, h: 1.7, parts: [
+      { n: "body", at: [0, 1, 0], b: [[0, 0, -8, -6, -8, 16, 14, 16]] },
+      { n: "rl", at: [-4, 8, 0], b: [[0, 32, -2, 0, -2, 4, 16, 4]] }, { n: "ll", at: [4, 8, 0], b: [[0, 55, -2, 0, -2, 4, 16, 4]] }], legs: [["rl", 1], ["ll", -1]] },
+    ravager: { tex: "entity/illager/ravager", tw: 128, th: 128, h: 2.2, parts: [
+      { n: "body", at: [0, 1, 2], rot: [P2, 0, 0], b: [[0, 55, -7, -10, -7, 14, 16, 20], [0, 91, -6, 6, -7, 12, 13, 18]] },
+      { n: "neck", at: [0, -7, 5.5], b: [[68, 73, -5, -1, -18, 10, 10, 18]] },
+      { n: "head", parent: "neck", at: [0, 16, -17], b: [[0, 0, -8, -20, -14, 16, 20, 16], [0, 0, -2, -6, -18, 4, 8, 4]] },
+      { n: "lhorn", parent: "head", at: [-10, -14, -8], rot: [1.0996, 0, 0], b: [[74, 55, 0, -14, -2, 2, 14, 4]] },
+      { n: "rhorn", parent: "head", at: [8, -14, -8], rot: [1.0996, 0, 0], b: [[74, 55, 0, -14, -2, 2, 14, 4, 0, 1]] },
+      { n: "mouth", parent: "head", at: [0, -2, 2], b: [[0, 36, -8, 0, -16, 16, 3, 16]] },
+      ...Q4(96, 0, [-4, 0, -4, 8, 37, 8], [[-8, -13, 18], [8, -13, 18], [-8, -13, -4], [8, -13, -4]], [[96, 0], [96, 0], [64, 0], [64, 0]])], legs: QUAD_LEGS },
+    warden: { tex: "entity/warden/warden", tw: 128, th: 128, h: 2.9, parts: [
+      { n: "body", at: [0, 3, 0], b: [[0, 0, -9, -13, -4, 18, 21, 11]] },
+      { n: "rrib", parent: "body", at: [-7, -2, -4], b: [[90, 11, -2, -11, -0.1, 9, 21, 0]] },
+      { n: "lrib", parent: "body", at: [7, -2, -4], b: [[90, 11, -7, -11, -0.1, 9, 21, 0, 0, 1]] },
+      { n: "head", parent: "body", at: [0, -13, 0], b: [[0, 32, -8, -16, -5, 16, 16, 10]] },
+      { n: "rt", parent: "head", at: [-8, -12, 0], b: [[52, 32, -16, -13, 0, 16, 16, 0]] },
+      { n: "lt", parent: "head", at: [8, -12, 0], b: [[58, 0, 0, -13, 0, 16, 16, 0]] },
+      { n: "ra", parent: "body", at: [-13, -13, 1], b: [[44, 50, -4, 0, -4, 8, 28, 8]] },
+      { n: "la", parent: "body", at: [13, -13, 1], b: [[0, 58, -4, 0, -4, 8, 28, 8]] },
+      { n: "rl", at: [-5.9, 11, 0], b: [[76, 48, -3.1, 0, -3, 6, 13, 6]] }, { n: "ll", at: [5.9, 11, 0], b: [[76, 76, -2.9, 0, -3, 6, 13, 6]] }],
+      legs: [["rl", 0.6], ["ll", -0.6], ["ra", -0.4], ["la", 0.4]], flap: [["rt", "y", 0.2, 0.7], ["lt", "y", -0.2, 0.7]] },
+    sniffer: { tex: "entity/sniffer/sniffer", tw: 192, th: 192, h: 1.75, parts: [
+      { n: "body", at: [0, 5, 0], b: [[62, 68, -12.5, -14, -20, 25, 29, 40], [62, 0, -12.5, -14, -20, 25, 24, 40, 0.5]] },
+      { n: "head", at: [0, 6.5, -19.48], b: [[8, 15, -6.5, -7.5, -11.5, 13, 18, 11], [8, 4, -6.5, 7.5, -11.5, 13, 0, 11]] },
+      { n: "lear", parent: "head", at: [6.51, -7.5, -4.51], b: [[2, 0, 0, 0, -3, 1, 19, 7]] },
+      { n: "rear", parent: "head", at: [-6.51, -7.5, -4.51], b: [[48, 0, -1, 0, -3, 1, 19, 7]] },
+      { n: "nose", parent: "head", at: [0, -4.5, -11.5], b: [[10, 45, -6.5, -2, -9, 13, 2, 9]] },
+      { n: "beak", parent: "head", at: [0, 2.5, -11.5], b: [[10, 57, -6.5, -7, -8, 13, 12, 9]] },
+      { n: "rf", at: [-7.5, 10, -15], b: [[32, 87, -3.5, -1, -4, 7, 10, 8]] }, { n: "rm", at: [-7.5, 10, 0], b: [[32, 105, -3.5, -1, -4, 7, 10, 8]] }, { n: "rh", at: [-7.5, 10, 15], b: [[32, 123, -3.5, -1, -4, 7, 10, 8]] },
+      { n: "lf", at: [7.5, 10, -15], b: [[0, 87, -3.5, -1, -4, 7, 10, 8]] }, { n: "lm", at: [7.5, 10, 0], b: [[0, 105, -3.5, -1, -4, 7, 10, 8]] }, { n: "lh", at: [7.5, 10, 15], b: [[0, 123, -3.5, -1, -4, 7, 10, 8]] }],
+      legs: [["rf", 1], ["lf", -1], ["rm", -1], ["lm", 1], ["rh", 1], ["lh", -1]] },
+    wither: { tex: "entity/wither/wither", tw: 64, th: 64, h: 3.5, scale: 2, hover: 0.1, parts: [
+      { n: "shoulders", at: [0, 0, 0], b: [[0, 16, -10, 3.9, -0.5, 20, 3, 3]] },
+      { n: "ribcage", at: [-2, 6.9, -0.5], rot: [0.2, 0, 0], b: [[0, 22, 0, 0, 0, 3, 10, 3], [24, 22, -4, 1.5, 0.5, 11, 2, 2], [24, 22, -4, 4, 0.5, 11, 2, 2], [24, 22, -4, 6.5, 0.5, 11, 2, 2]] },
+      { n: "tail", parent: "ribcage", at: [0, 10, 0], rot: [0.6, 0, 0], b: [[12, 22, 0, 0, 0, 3, 6, 3]] },
+      { n: "head", at: [0, 0, 0], b: [[0, 0, -4, -4, -4, 8, 8, 8]] },
+      { n: "rhead", at: [-8, 4, 0], b: [[32, 0, -4, -4, -4, 6, 6, 6]] },
+      { n: "lhead", at: [10, 4, 0], b: [[32, 0, -4, -4, -4, 6, 6, 6]] }], legs: [] },
+    ender_dragon: { tex: "entity/enderdragon/dragon", tw: 256, th: 256, h: 8, hover: 0.5, parts: [
+      { n: "body", at: [0, 4, 8], b: [[0, 0, -12, 0, -16, 24, 24, 64], [220, 53, -1, -6, -10, 2, 6, 12], [220, 53, -1, -6, 10, 2, 6, 12], [220, 53, -1, -6, 30, 2, 6, 12]] },
+      ...[0, 1, 2, 3, 4].map(i => ({ n: "neck" + i, at: [0, 17, -8 - i * 10], b: [[192, 104, -5, -5, -5, 10, 10, 10], [48, 0, -1, -9, -3, 2, 4, 6]] })),
+      { n: "head", at: [0, 17, -56], b: [[176, 44, -6, -1, -24, 12, 5, 16], [112, 30, -8, -8, -10, 16, 16, 16], [0, 0, -5, -12, -4, 2, 4, 6], [112, 0, -5, -3, -22, 2, 2, 4], [0, 0, 3, -12, -4, 2, 4, 6, 0, 1], [112, 0, 3, -3, -22, 2, 2, 4, 0, 1]] },
+      { n: "jaw", parent: "head", at: [0, 4, -8], b: [[176, 65, -6, 0, -16, 12, 4, 16]] },
+      ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(i => ({ n: "tail" + i, at: [0, 10 + i * 0.6, 60 + i * 10], b: [[192, 104, -5, -5, -5, 10, 10, 10], [48, 0, -1, -9, -3, 2, 4, 6]] })),
+      { n: "lw", at: [12, 5, 2], b: [[112, 88, 0, -4, -4, 56, 8, 8], [-56, 88, 0, 0, 2, 56, 0, 56, 0, 1]] },
+      { n: "lw2", parent: "lw", at: [56, 0, 0], b: [[192, 0, 0, -2, -2, 56, 4, 4], [-56, 144, 0, 0, 2, 56, 0, 56, 0, 1]] },
+      { n: "rw", at: [-12, 5, 2], b: [[112, 88, -56, -4, -4, 56, 8, 8], [-56, 88, -56, 0, 2, 56, 0, 56]] },
+      { n: "rw2", parent: "rw", at: [-56, 0, 0], b: [[192, 0, -56, -2, -2, 56, 4, 4], [-56, 144, -56, 0, 2, 56, 0, 56]] },
+      ...Q4(112, 104, [-4, -4, -4, 8, 24, 8], [[-16, 16, 42], [16, 16, 42], [-12, 20, 2], [12, 20, 2]], [[0, 0], [0, 0], [112, 104], [112, 104]])],
+      legs: QUAD_LEGS, flap: [["lw", "z", 0.5, 0.35], ["rw", "z", -0.5, 0.35]] },
+  });
   function modelMat(key, colour, translucent) {
     const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, alphaTest: translucent ? 0.05 : 0.5, depthWrite: !translucent });
     if (userPack && userPack.get(key)) loadImg(key).then(img => { if (!img) return; const t = new THREE.Texture(img); t.magFilter = t.minFilter = THREE.NearestFilter; t.needsUpdate = true; mat.map = t; mat.color.setScalar(worldLight); mat.needsUpdate = true; });
@@ -944,20 +1246,23 @@
     for (const part of def.parts) {
       const g = new THREE.Group(); g.position.set(part.at[0] * PX, -part.at[1] * PX, -part.at[2] * PX);
       if (part.rot) { g.rotation.order = "ZYX"; g.rotation.set(part.rot[0], -part.rot[1], -part.rot[2]); }
-      for (const b of part.b) {
+      for (const b of part.b || []) {
         const [u, v, x0, y0, z0, w, h, d, inf = 0, mir = 0, mi = 0] = b;
-        const geo = new THREE.BoxGeometry((w + 2 * inf) * PX, (h + 2 * inf) * PX, (d + 2 * inf) * PX);
+        const geo = new THREE.BoxGeometry(Math.max(0.02, w + 2 * inf) * PX, Math.max(0.02, h + 2 * inf) * PX, Math.max(0.02, d + 2 * inf) * PX);
         boxUV(geo, u, v, w, h, d, def.tw, def.th, !!mir);
         const m = new THREE.Mesh(geo, mats[mi] || mats[0]); m.position.set((x0 + w / 2) * PX, -(y0 + h / 2) * PX, -(z0 + d / 2) * PX);
         g.add(m);
       }
-      inner.add(g); parts[part.n] = g;
+      (part.parent && parts[part.parent] ? parts[part.parent] : inner).add(g); parts[part.n] = g;
     }
     if (p.skin) { const tag = nameTag(p.skin, -1); tag.position.y = def.h * k + 0.35; root.add(tag); }
     scene.add(root);
     const legs = def.legs.map(([n]) => parts[n]).filter(Boolean), signs = def.legs.map(([, sg]) => sg);
     const head = parts.head || new THREE.Group();
-    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats };
+    // Wings flap (about their own axis), blaze rods and the like turn.
+    const flaps = (def.flap || []).filter(([n]) => parts[n]).map(([n, ax, amp, speed]) => [parts[n], ax, amp, speed || 1, parts[n].rotation[ax]]);
+    const spins = (def.spin || []).filter(n => parts[n]).map(n => parts[n]);
+    return { root, body: model, head, legs, legSign: signs, legBase: legs.map(l => l.rotation.x), phase: 0, x: p.x, z: p.z, mob: true, mats, flaps, spins, hover: def.hover || 0 };
   }
   function makeMob(p) {
     if (MOBS[p.name]) return buildMob(MOBS[p.name], p);
@@ -1844,6 +2149,7 @@
         }
         if (isMe) fpSetSkin(p.skin, p.team);
         a.head.rotation.x = pitch * Math.PI / 180 * 0.9;
+        if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
         if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing * 1.4 : (k % 2 ? swing : -swing))); a.head.rotation.x = pitch * Math.PI / 180 * 0.9; continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -swing * 0.8; a.armL.rotation.x = swing * 0.8;
         // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
