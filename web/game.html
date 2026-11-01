@@ -119,14 +119,13 @@
   <div class="box">
     <h1>PISAN LIG</h1>
     <p class="sub">Minecraft sunucusuna tarayıcıdan gerçek oyuncu olarak gir</p>
-    <label for="name">Oyuncu adı</label>
-    <input class="field" id="name" maxlength="16" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
-    <label for="server">Sunucu</label>
-    <input class="field" id="server" maxlength="80" placeholder="pisan-sf-league.exaroton.me" autocapitalize="off" spellcheck="false">
-    <label for="auth">Giriş</label>
-    <select class="field" id="auth"><option value="offline">Sadece ad (cracked sunucular, Pisan Lig)</option><option value="microsoft">Microsoft hesabı (online sunucular)</option></select>
-    <label for="skin">Skin (bir Minecraft kullanıcı adı, isteğe bağlı)</label>
-    <input class="field" id="skin" maxlength="16" placeholder="Notch" autocapitalize="off" spellcheck="false">
+    <label for="name" class="ligOnly">Oyuncu adı</label>
+    <input class="field ligOnly" id="name" maxlength="16" placeholder="Ali_10" autocomplete="nickname" autocapitalize="off" spellcheck="false">
+    <label>Sunucu</label>
+    <div class="row"><button class="mcbtn sel" id="srvLig" type="button">Pisan Lig</button><button class="mcbtn" id="srvPvp" type="button">Pisan PvP</button></div>
+    <p class="note" id="srvNote">Pisan Lig: sadece adınla girersin.</p>
+    <label for="skin" class="ligOnly">Skin (bir Minecraft kullanıcı adı, isteğe bağlı)</label>
+    <input class="field ligOnly" id="skin" maxlength="16" placeholder="Notch" autocapitalize="off" spellcheck="false">
     <label for="sens">Bakış hassasiyeti</label>
     <input type="range" id="sens" min="0.05" max="1" step="0.05">
     <div class="err" id="loginErr"></div>
@@ -323,16 +322,20 @@
     ws.onclose = () => { ws = null; if (playing) $("loginErr").textContent = "Bağlantı koptu; sunucu kapanmış olabilir."; playing = false; show("login"); };
   }
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
-  $("server").value = store.get("pisan-web-server") || "";
-  $("auth").value = store.get("pisan-web-auth") || "offline";
+  // Pisan Lig (name only, "(mobil)" in front) or Pisan PvP (online mode: sign in with your Minecraft account).
+  let server = store.get("pisan-web-server") === "pvp" ? "pvp" : "";
+  function pickServer(s) {
+    server = s; $("srvLig").classList.toggle("sel", !s); $("srvPvp").classList.toggle("sel", s === "pvp");
+    $("srvNote").textContent = s === "pvp" ? "Pisan PvP: gerçek Minecraft hesabınla (Microsoft) girersin; ad ve skin hesabından gelir." : "Pisan Lig: sadece adınla girersin; adının başında (mobil) yazar.";
+    document.querySelectorAll(".ligOnly").forEach(e => e.style.display = s === "pvp" ? "none" : "");
+  }
+  $("srvLig").onclick = () => pickServer(""); $("srvPvp").onclick = () => pickServer("pvp");
+  pickServer(server);
   $("go").onclick = () => {
-    const n = $("name").value.trim(), skin = $("skin").value.trim(), server = $("server").value.trim().toLowerCase(), auth = $("auth").value;
-    const home = !server || server === "pisan-sf-league.exaroton.me";
-    if (home && !/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Pisan Lig için ad 3–9 karakter (başına (mobil) eklenir)."; return; }
-    if (!home && !/^[A-Za-z0-9_]{3,16}$/.test(n)) { $("loginErr").textContent = "Ad: 3–16 karakter; harf, rakam, _."; return; }
-    if (server && !/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(server)) { $("loginErr").textContent = "Sunucu adresi geçersiz."; return; }
+    const n = $("name").value.trim(), skin = $("skin").value.trim(), auth = server === "pvp" ? "microsoft" : "offline";
+    if (!server && !/^[A-Za-z0-9_]{3,9}$/.test(n)) { $("loginErr").textContent = "Pisan Lig için ad 3–9 karakter (başına (mobil) eklenir)."; return; }
     if (skin && !/^[A-Za-z0-9_]{1,16}$/.test(skin)) { $("loginErr").textContent = "Skin adı geçersiz."; return; }
-    store.set("pisan-web-name", n); store.set("pisan-web-skin", skin); store.set("pisan-web-server", server); store.set("pisan-web-auth", auth);
+    store.set("pisan-web-name", n); store.set("pisan-web-skin", skin); store.set("pisan-web-server", server);
     $("loginErr").textContent = "Bağlanıyor…";
     connect(() => send({ t: "hello", name: n, skin, server, auth }));
   };
@@ -1631,7 +1634,7 @@
       if (BE_ITEM.test(name)) {
         const model = beItemModel(name, x), box = new THREE.Group(), inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(model); box.add(inner);
         if (kind === "fp") { box.rotation.set(0, Math.PI / 4, 0); box.scale.setScalar(0.4); }
-        else if (kind === "tp") { box.position.set(0, -0.06, -0.12); box.rotation.set(75 * Math.PI / 180, Math.PI / 4, 0); box.scale.setScalar(0.3); }
+        else if (kind === "tp" || kind === "tpl") { const sg = kind === "tpl" ? -1 : 1; box.position.set(0, 2.5 / 16, 0); box.rotation.set(75 * Math.PI / 180, sg * Math.PI / 4, 0); box.scale.setScalar(0.375); }
         else box.scale.setScalar(0.25);
         grp.add(box); return;
       }
@@ -1640,7 +1643,7 @@
         const c = await shieldCanvas(x);
         const pl = new THREE.Mesh(new THREE.PlaneGeometry(12 / 16, 22 / 16), new THREE.MeshBasicMaterial({ map: nearestTex(c), side: THREE.DoubleSide }));
         if (kind === "fp") { pl.position.set(-0.1, 0.1, 0); pl.rotation.set(0, Math.PI / 2, 0); pl.scale.setScalar(0.6); }
-        else if (kind === "tp") { pl.position.set(0, -0.05, -0.12); pl.rotation.set(-Math.PI / 2 + 0.2, 0, 0); pl.rotation.order = "YXZ"; pl.rotation.y = Math.PI / 2; pl.scale.setScalar(0.55); }
+        else if (kind === "tp" || kind === "tpl") { const sg = kind === "tpl" ? -1 : 1; pl.position.set(sg * -1 / 16, 2 / 16, 0); pl.rotation.set(0, sg * Math.PI / 2, 0); pl.scale.setScalar(0.85); }
         else pl.scale.setScalar(0.35);
         grp.add(pl); return;
       }
@@ -1653,7 +1656,7 @@
         const cube = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), [ms, ms, mt, mb, ms, ms]);
         // Minecraft's block display: first person turned 45° at 0.4, in the hand 0.375 tilted, dropped 0.25.
         if (kind === "fp") { cube.rotation.set(0, Math.PI / 4, 0); cube.scale.setScalar(0.4); }
-        else if (kind === "tp") { cube.position.set(0, -0.06, -0.12); cube.rotation.set(75 * Math.PI / 180, Math.PI / 4, 0); cube.scale.setScalar(0.3); }
+        else if (kind === "tp" || kind === "tpl") { const sg = kind === "tpl" ? -1 : 1; cube.position.set(0, 2.5 / 16, 0); cube.rotation.set(75 * Math.PI / 180, sg * Math.PI / 4, 0); cube.scale.setScalar(0.375); }
         else cube.scale.setScalar(0.25);
         grp.add(cube); return;
       } }
@@ -1662,12 +1665,27 @@
       if (kind === "fp") {
         // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68.
         plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(-0.68, 0.68, 0.68);
-      } else if (kind === "tp") {
-        if (HANDHELD(name)) { plane.position.set(0, -0.05, -0.3); plane.rotation.set(-Math.PI / 4 + 0.2, Math.PI / 2, 0, "YXZ"); plane.scale.setScalar(0.75); }
-        else { plane.position.set(0, -0.12, -0.18); plane.rotation.set(0, Math.PI / 2, 0); plane.scale.setScalar(0.45); }
+      } else if (kind === "tp" || kind === "tpl") {
+        // thirdperson_righthand of item/handheld: rotation (0, -90, 55), translation (0, 4, 0.5)/16, scale 0.85;
+        // of item/generated: translation (0, 3, 1)/16, scale 0.55. The left hand mirrors them.
+        const sg = kind === "tpl" ? -1 : 1;
+        if (HANDHELD(name)) { plane.position.set(0, 4 / 16, 0.5 / 16); plane.rotation.set(0, sg * -Math.PI / 2, sg * 55 * Math.PI / 180); plane.scale.set(0.85, 0.85, 0.85); }
+        else { plane.position.set(0, 3 / 16, 1 / 16); plane.scale.set(0.55, 0.55, 0.55); }
       } else plane.scale.setScalar(0.35);
       grp.add(plane);
     }
+  }
+
+  /* An item in a hand, the way Minecraft puts it there: from the arm's pivot, turned into the model's own
+     (upside-down) frame, rotated -90° about x and 180° about y, moved (±1/16, 2/16, -10/16), then the item's
+     own third-person display transform (done in itemMesh). */
+  function heldInHand(spec, left) {
+    const holder = new THREE.Group(); holder.rotation.x = Math.PI;
+    const a1 = new THREE.Group(); a1.rotation.x = -Math.PI / 2; holder.add(a1);
+    const a2 = new THREE.Group(); a2.rotation.y = Math.PI; a1.add(a2);
+    const a3 = new THREE.Group(); a3.position.set((left ? -1 : 1) / 16, 0.125, -0.625); a2.add(a3);
+    a3.add(itemMesh(spec, left ? "tpl" : "tp"));
+    return holder;
   }
   // The first-person hand lives in its own scene, drawn over the world, as in Minecraft.
   const handScene = new THREE.Scene();
@@ -1697,7 +1715,7 @@
   /* Minecraft's own first-person poses: view bobbing, the swing (6 ticks), lowering and raising when the item changes. */
   function fpPose(now, dt) {
     const t = Math.min(1, (now - swingAt) / 300), sw = t < 1 ? t : 0;
-    const equip = Math.max(0, 1 - (now - equipAt) / 200), drop = equip > 0.5 ? (1 - equip) * 2 : equip * 2; // down then up
+    const drop = Math.max(0, 1 - (now - equipAt) / 200); // a new item comes up from below, as in Minecraft
     M4.identity();
     if (gfx.bob) {
       const w = walkDist * Math.PI;
@@ -2689,6 +2707,11 @@
     // A teleport that also turns us (kick-off facing the goal): take the new look the moment it arrives,
     // not through the smoothing, which can skip the one state that carries it.
     if (o.yaw !== undefined) { me.yaw = o.yaw; me.pitch = o.pitch; }
+    // A server teleport (or a pull-back) is taken the moment it arrives: until then the relay drops our
+    // positions, so every frame of delay is time the server sees us standing still.
+    if (me.ready && o.me && o.tp !== undefined && o.tp !== me.tp) {
+      me.x = me.px = o.me[0]; me.y = me.py = o.me[1]; me.z = me.pz = o.me[2]; me.vy = 0; me.tp = o.tp;
+    }
     if (typeof o.ts !== "number") { snaps.push({ at: now, d: o }); if (snaps.length > 16) snaps.shift(); return; }
     const off = now - o.ts;
     if (clockOff === null || off < clockOff) clockOff = off; else clockOff += 0.02; // follows slow clock drift
@@ -2753,8 +2776,10 @@
         // swing as cos(position × 0.6662) × 1.4 × speed, the arms against the legs.
         const mdx = px - a.x, mdz = pz - a.z;
         let moved = Math.hypot(mdx, mdz); a.x = px; a.z = pz;
-        if (moved > 4) moved = 0;
         const ticks = Math.max(0.001, dt / 0.05);
+        // More than a block a tick is a teleport, not walking (Minecraft resets its "last position" then).
+        const teleported = moved / ticks > 1.2;
+        if (teleported) moved = 0;
         a.walkSpeed = (a.walkSpeed || 0) + (Math.min(1, moved / ticks * 4) - (a.walkSpeed || 0)) * (1 - Math.pow(0.6, ticks));
         a.walkPos = (a.walkPos || 0) + a.walkSpeed * ticks;
         const walk = Math.cos(a.walkPos * 0.6662) * a.walkSpeed, swing = walk * 1.4;
@@ -2764,13 +2789,16 @@
         const wrapDeg = d => ((d % 360) + 540) % 360 - 180;
         if (a.item || a.thing || !a.head) a.bodyYaw = yawDeg;
         else {
-          if (a.bodyYaw === undefined) a.bodyYaw = yawDeg;
-          const moving = moved / ticks > 0.02;
+          if (a.bodyYaw === undefined || teleported) a.bodyYaw = yawDeg;
+          const moving = moved / ticks > 0.05, swinging = a.swingAt && now - a.swingAt < 300;
           let target = a.bodyYaw;
           if (moving) { let mv = Math.atan2(-mdx, mdz) * 180 / Math.PI; if (Math.abs(wrapDeg(mv - yawDeg)) > 95) mv += 180; target = mv; }
+          if (swinging) target = yawDeg;
           a.bodyYaw += wrapDeg(target - a.bodyYaw) * (1 - Math.pow(0.7, ticks));
-          const lim = moving ? 75 : 50, diff = wrapDeg(yawDeg - a.bodyYaw);
-          if (Math.abs(diff) > lim) a.bodyYaw += diff - Math.sign(diff) * lim;
+          // The head turns at most 75° from the body; past 50° the body follows it, a fifth of the way a tick.
+          let diff = wrapDeg(yawDeg - a.bodyYaw);
+          if (Math.abs(diff) > 75) { a.bodyYaw += diff - Math.sign(diff) * 75; diff = Math.sign(diff) * 75; }
+          if (Math.abs(diff) > 50) a.bodyYaw += diff * (1 - Math.pow(0.8, ticks));
           a.head.rotation.y = -wrapDeg(yawDeg - a.bodyYaw) * Math.PI / 180;
         }
         a.root.rotation.y = -a.bodyYaw * Math.PI / 180;
@@ -2784,17 +2812,18 @@
         if (a.slots) wearArmour(a, p.ar);
         // The other hand: shields, torches, maps… in the left hand, as worn.
         const leftHand = a.armL || (a.slots && a.slots.la && a.slots.la[0]);
-        if (leftHand && a.offName !== p.off) { if (a.offMesh) leftHand.remove(a.offMesh); a.offName = p.off; a.offMesh = p.off ? itemMesh(p.off, "tp") : null; if (a.offMesh) { a.offMesh.position.set(a.armL ? 0 : PX, (a.armL ? -10 : -9) * PX, 0); leftHand.add(a.offMesh); } }
+        if (leftHand && a.offName !== p.off) { if (a.offMesh) leftHand.remove(a.offMesh); a.offName = p.off; a.offMesh = p.off ? heldInHand(p.off, true) : null; if (a.offMesh) leftHand.add(a.offMesh); }
         if (a.cape) a.cape.rotation.x = 0.1 + (a.walkSpeed || 0) * 0.9 + (sneak ? 0.3 : 0);
-        if (a.mob && a.handPart && a.held !== p.held) { if (a.heldMesh) a.handPart.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.set(-1 * PX, -9 * PX, 0); a.handPart.add(a.heldMesh); } }
+        if (a.mob && a.handPart && a.held !== p.held) { if (a.heldMesh) a.handPart.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? heldInHand(p.held, false) : null; if (a.heldMesh) a.handPart.add(a.heldMesh); }
         a.head.rotation.x = (a.headBase || 0) + pitch * Math.PI / 180;
         if (a.tilt) a.tilt.rotation.x = pitch * Math.PI / 180;
         if (a.mob && a.flaps) { for (const [g, ax, amp, sp, base] of a.flaps) g.rotation[ax] = base + Math.sin(now / 90 * sp) * amp; for (const g of a.spins) g.rotation.y += dt * 1.5; if (a.hover) a.body.position.y = Math.sin(now / 600) * a.hover; }
         if (a.mob) { a.legs.forEach((l, k) => l.rotation.x = (a.legBase ? a.legBase[k] : 0) + (a.legSign ? a.legSign[k] * swing : (k % 2 ? swing : -swing))); continue; }
         a.legR.rotation.x = swing; a.legL.rotation.x = -swing; a.armR.rotation.x = -walk; a.armL.rotation.x = walk;
         // Holding something: the arm a little forward, the item in the hand; a swing chops it down and back.
-        if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? itemMesh(p.held, "tp") : null; if (a.heldMesh) { a.heldMesh.position.y = -10 * PX; a.armR.add(a.heldMesh); } }
+        if (a.held !== p.held) { if (a.heldMesh) a.armR.remove(a.heldMesh); a.held = p.held; a.heldMesh = p.held ? heldInHand(p.held, false) : null; if (a.heldMesh) a.armR.add(a.heldMesh); }
         if (p.held) a.armR.rotation.x = a.armR.rotation.x * 0.5 - Math.PI / 10;
+        if (p.off) a.armL.rotation.x = a.armL.rotation.x * 0.5 - Math.PI / 10;
         if (a.swingAt) { const t = (now - a.swingAt) / 300; if (t < 1) { a.armR.rotation.x -= Math.sin(t * Math.PI) * 1.3 + Math.sin(Math.sqrt(t) * Math.PI) * 0.4; a.armR.rotation.y = Math.sin(Math.sqrt(t) * Math.PI) * 0.3; } else a.armR.rotation.y = 0; }
         // Crouching as Minecraft poses it: only the torso leans, the head and arms drop, the legs step back,
         // the arms come forward, and the whole player sits 2 pixels lower.
@@ -2864,7 +2893,7 @@
   setInterval(() => { if (playing && me.ready && performance.now() - lastSent > 200) sendInput(true); }, 200);
   const act = a => {
     send({ t: "act", a }); if (navigator.vibrate) navigator.vibrate(12);
-    if (a === "ldown" || (a === "rdown" && !/^bow(~|$)/.test(fpItemName || ""))) { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
+    if (a === "ldown") { swingAt = performance.now(); const mine = avatars.get(myId); if (mine) mine.swingAt = swingAt; }
   };
   const rightDown = () => { charge = performance.now(); act("rdown"); };
   const rightUp = () => { charge = -1; act("rup"); };

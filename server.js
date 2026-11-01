@@ -20,6 +20,7 @@ const { Vec3 } = require("vec3");
 const PORT = +(process.argv[2] || process.env.PORT || 25565);
 const KEY = (process.argv[3] || process.env.RELAY_KEY || readFile("pisan-relay-key.txt") || "").trim();
 const HOME_SERVER = (process.env.MC_SERVER || "pisan-sf-league.exaroton.me").toLowerCase();
+const PVP_SERVER = (process.env.PVP_SERVER || "pisanpvp.exaroton.me").toLowerCase();
 const WEB = path.join(__dirname, "web");
 const MAX_PLAYERS = 40;
 const MAX_PER_IP = 3;
@@ -183,18 +184,18 @@ class Session {
   hello(o) {
     if (this.bot || this.connecting) return;
     const name = String(o.name || "").trim(), skin = String(o.skin || "").trim();
-    let target = String(o.server || "").trim().toLowerCase() || HOME_SERVER;
-    if (!/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(target)) return this.send({ t: "error", text: "Sunucu adresi geçersiz." });
-    const [host, port] = target.includes(":") ? [target.split(":")[0], +target.split(":")[1]] : [target, 25565];
-    this.host = host; this.port = port || 25565;
-    this.home = host === HOME_SERVER;
-    this.microsoft = o.auth === "microsoft" && !this.home;
+    // Two servers only: Pisan Lig (cracked, "(mobil)" names) and Pisan PvP (online mode: a real Minecraft account).
+    const pvp = String(o.server || "").trim().toLowerCase() === "pvp";
+    const addr = (pvp ? PVP_SERVER : HOME_SERVER).split(":");
+    this.host = addr[0]; this.port = +addr[1] || 25565;
+    this.home = !pvp; this.pvp = pvp;
+    this.microsoft = pvp;
     if (this.home) {
       if (!/^[A-Za-z0-9_]{3,9}$/.test(name)) return this.send({ t: "error", text: "Ad 3–9 karakter olmalı: harf, rakam ve _ (Pisan Lig'de başına (mobil) eklenir)." });
       this.name = "(mobil)" + name;
     } else {
-      if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) return this.send({ t: "error", text: "Ad 3–16 karakter olmalı: harf, rakam ve _." });
-      this.name = name;
+      // Pisan PvP: the name is the Microsoft account's own; this one only keys the sign-in for this session.
+      this.name = /^[A-Za-z0-9_]{1,16}$/.test(name) ? name : "pisan";
     }
     this.skin = /^[A-Za-z0-9_]{1,16}$/.test(skin) ? skin : "";
     this.connect();
@@ -204,8 +205,8 @@ class Session {
     if (this.closed) return;
     this.connecting = true;
     this.everSpawned = false; this.lastKick = "";
-    this.send({ t: "waking", text: (this.home ? "Pisan Lig" : this.host) + " sunucusuna bağlanılıyor…" });
-    const options = { host: this.host, port: this.port, username: this.name, hideErrors: true, checkTimeoutInterval: 60000, version: this.home ? "1.20.1" : false };
+    this.send({ t: "waking", text: (this.home ? "Pisan Lig" : "Pisan PvP") + " sunucusuna bağlanılıyor…" });
+    const options = { host: this.host, port: this.port, username: this.name, hideErrors: true, checkTimeoutInterval: 60000, version: "1.20.1" };
     if (this.microsoft) {
       // Microsoft sign-in with a device code; the token lives only for this session.
       this.authDir = this.authDir || fs.mkdtempSync(path.join(os.tmpdir(), "pisan-msa-"));
@@ -230,7 +231,7 @@ class Session {
       log("Girdi:", this.name, "→", this.host, bot.version);
       this.meId = (bot.player && bot.player.uuid || "me").slice(0, 8);
       this.Block = require("prismarine-block")(bot.registry);
-      this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : this.host, version: bot.version });
+      this.send({ t: "welcome", name: this.name, me: this.meId, server: this.home ? "Pisan Lig" : "Pisan PvP", version: bot.version });
       // States follow the server's ticks (the plugin's extras arrive once per tick); the timer covers other servers.
       this.timer = setInterval(() => { if (Date.now() - (this.extrasAt || 0) > 200) this.tick(); }, 50);
       bot.world.on("blockUpdate", (old, now) => {
@@ -298,11 +299,12 @@ class Session {
       clearInterval(this.timer); clearInterval(this.useTimer);
       this.bot = null; this.connecting = false;
       if (this.closed) return;
-      if (this.everSpawned || this.microsoft || !this.home) {
+      if (this.everSpawned || (this.pvp && this.wakeTries > 30)) {
         this.send({ t: "error", text: "Sunucudan ayrıldın: " + (this.lastKick || "bağlantı koptu") });
         return this.ws.close();
       }
-      // Pisan Lig not up yet: this join attempt has asked exaroton to start it. Knock again shortly.
+      // Not up yet: this join attempt has asked exaroton to start it (both servers start on join). Knock again shortly.
+      this.wakeTries = (this.wakeTries || 0) + 1;
       this.send({ t: "waking", text: this.lastKick || "Sunucu başlatılıyor…" });
       this.retry = setTimeout(() => this.connect(), 8000);
     });
@@ -329,7 +331,8 @@ class Session {
         if (Number.isFinite(+o.yaw) && Number.isFinite(+o.pitch)) { bot.entity.yaw = toYaw(+o.yaw); bot.entity.pitch = toPitch(Math.max(-90, Math.min(90, +o.pitch))); }
         // The page moves the player (with collisions), as a Minecraft client does; the client here only reports it.
         // After a server teleport, positions from before the page saw it are ignored.
-        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq) {
+        if (Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq &&
+            Math.hypot(o.pos[0] - bot.entity.position.x, o.pos[2] - bot.entity.position.z) < 8) {
           bot.entity.position.set(o.pos[0], o.pos[1], o.pos[2]);
           bot.entity.onGround = !!o.ground;
           bot.entity.velocity.set(0, 0, 0);
@@ -434,7 +437,7 @@ class Session {
         if (info && info.gamemode === 3 && !isMe) continue;
         // The skin the server gives this player (as a Minecraft client gets it), else their name for Mojang.
         const sd = (info && info.skinData) || (isMe && bot.player && bot.player.skinData) || null;
-        const skinKey = sd && sd.url ? "#" + sd.url.split("/").pop() : (name.startsWith("(mobil)") ? "" : name);
+        const skinKey = sd && sd.url ? "#" + sd.url.split("/").pop() : isMe && this.skin ? this.skin : (name.startsWith("(mobil)") ? "" : name);
         const capeKey = sd && sd.capeUrl ? "#" + sd.capeUrl.split("/").pop() : "";
         people.push([isMe ? this.meId : (e.uuid || "").slice(0, 8), name, teamOf(bot, name), r2(e.position.x), r2(e.position.y), r2(e.position.z), Math.round(fromYaw(e.yaw)), Math.round(fromPitch(e.pitch)), sneaking(e) ? 1 : 0, skinKey, "p", 0.6, 1.8, heldName(isMe ? bot.heldItem : e.heldItem), 0, armourOf(isMe ? { equipment: [0, 0, bot.inventory.slots[8], bot.inventory.slots[7], bot.inventory.slots[6], bot.inventory.slots[5]] } : e), offhandOf(isMe ? { equipment: [0, bot.inventory.slots[45]] } : e), sd && sd.model === "slim" ? 1 : 0, capeKey]);
       } else if (e.name === "armor_stand") {
