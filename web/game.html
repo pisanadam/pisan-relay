@@ -1633,7 +1633,7 @@
       let flat = null;
       if (BE_ITEM.test(name)) {
         const model = beItemModel(name, x), box = new THREE.Group(), inner = new THREE.Group(); inner.position.set(-0.5, -0.5, -0.5); inner.add(model); box.add(inner);
-        if (kind === "fp") { box.rotation.set(0, Math.PI / 4, 0); box.scale.setScalar(0.4); }
+        if (kind === "fp" || kind === "fpu") { box.rotation.set(0, Math.PI / 4, 0); box.scale.setScalar(0.4); }
         else if (kind === "tp" || kind === "tpl") { const sg = kind === "tpl" ? -1 : 1; box.position.set(0, 2.5 / 16, 0); box.rotation.set(75 * Math.PI / 180, sg * Math.PI / 4, 0); box.scale.setScalar(0.375); }
         else box.scale.setScalar(0.25);
         grp.add(box); return;
@@ -1663,12 +1663,13 @@
       const plane = extruded(flat);
       if (x.g) { const mk = document.createElement("canvas"); mk.width = mk.height = 16; const mg = mk.getContext("2d"), d = flat.getContext("2d").getImageData(0, 0, 16, 16), o = mg.createImageData(16, 16); for (let i = 0; i < 1024; i += 4) { const v = d.data[i + 3] > 128 ? 255 : 0; o.data[i] = o.data[i + 1] = o.data[i + 2] = v; o.data[i + 3] = 255; } mg.putImageData(o, 0, 0); plane.userData.mask = nearestTex(mk); }
       const ROD = /^(fishing_rod|carrot_on_a_stick|warped_fungus_on_a_stick)$/.test(name);
-      if (kind === "fp") {
+      if (kind === "fp" || kind === "fpu") {
+        const sx = kind === "fpu" ? 0.68 : -0.68; // a bow being drawn faces the other way round
         // firstperson_righthand of item/generated and item/handheld: rotation (0, -90, 25), translation (1.13, 3.2, 1.13)/16, scale 0.68;
         // item/handheld_rod (rods): rotation (0, 90, 25), translation (0, 1.6, 0.8)/16; the crossbow: rotation (-90, 0, -55).
-        if (ROD) { plane.position.set(0, 1.6 / 16, 0.8 / 16); plane.rotation.set(0, Math.PI / 2, deg(25)); plane.scale.set(0.68, 0.68, 0.68); }
-        else if (name === "crossbow") { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(deg(-90), 0, deg(-55)); plane.scale.set(0.68, 0.68, 0.68); }
-        else { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(0.68, 0.68, 0.68); }
+        if (ROD) { plane.position.set(0, 1.6 / 16, 0.8 / 16); plane.rotation.set(0, Math.PI / 2, deg(25)); plane.scale.set(sx, 0.68, 0.68); }
+        else if (name === "crossbow") { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(deg(-90), 0, deg(-55)); plane.scale.set(sx, 0.68, 0.68); }
+        else { plane.position.set(1.13 / 16, 3.2 / 16, 1.13 / 16); plane.rotation.set(0, -Math.PI / 2, 25 * Math.PI / 180); plane.scale.set(sx, 0.68, 0.68); }
       } else if (kind === "tp" || kind === "tpl") {
         // thirdperson_righthand of item/handheld: rotation (0, -90, 55), translation (0, 4, 0.5)/16, scale 0.85;
         // of item/handheld_rod: rotation (0, 90, 55), translation (0, 4, 2.5)/16;
@@ -1792,7 +1793,7 @@
   function fpItemMesh(spec, blocking) {
     const name = itemBase(spec);
     if (name === "shield") return shieldModel(spec, blocking ? "fpb" : "fp");
-    return itemMesh(spec, "fp");
+    return itemMesh(spec, /^bow_pulling_/.test(name) ? "fpu" : "fp");
   }
   // A shield as the game draws it (ShieldModel through its item display transforms).
   function shieldModel(spec, kind) {
