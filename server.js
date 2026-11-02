@@ -284,7 +284,7 @@ class Session {
       return raw(name, data);
     };
     // Packets are answered in the order they came: the pings before a teleport are answered before its confirmation.
-    bot._client.prependListener("position", () => { this.tpReply = true; this.pongUpTo(Infinity); });
+    bot._client.prependListener("position", () => { this.tpReply = true; this.tpReplyAt = Date.now(); this.pongUpTo(Infinity); });
     // After a respawn mineflayer holds its teleport answer back for a while; a Minecraft client answers at once.
     bot._client.on("position", () => queueMicrotask(() => { // after mineflayer's own handler (and its confirmation)
       if (!this.tpReply || !bot.entity) return;
@@ -335,7 +335,7 @@ class Session {
         const b = this.box;
         if (b && c.x + 16 > b.x0 && c.x <= b.x1 && c.z + 16 > b.z0 && c.z <= b.z1) this.dirty = true;
       });
-      bot.on("respawn", () => { this.regionAt = null; this.tpReply = true; this.sprintSent = this.sneakSent = false; this.send({ t: "noworld" }); }); // a new world: no move until its teleport is answered
+      bot.on("respawn", () => { this.regionAt = null; this.tpReply = true; this.tpReplyAt = Date.now(); this.sprintSent = this.sneakSent = false; this.send({ t: "noworld" }); }); // a new world: no move until its teleport is answered
       // Knockback and explosions push us: the page moves by them, and the check allows for them.
       this.move = { air: 0, rise: 0, hover: 0, kbH: 0, kbY: 0 };
       const push = (vx, vy, vz, add) => { this.move.kbH = Math.max(this.move.kbH, Math.hypot(vx, vz) + 0.1); this.move.kbY = Math.max(this.move.kbY, vy + 0.1); this.ordered(add ? { t: "vel", v: [vx, vy, vz], add: 1 } : { t: "vel", v: [vx, vy, vz] }); };
@@ -437,6 +437,8 @@ class Session {
         // After a server teleport, positions from before the page saw it are ignored.
         // A dead player does not move, and nothing moves before the server's teleport has been answered.
         const alive = bot.isAlive !== false && !(bot.health <= 0);
+        // A teleport answer that never came (a respawn without its teleport): do not keep the player standing.
+        if (this.tpReply && Date.now() - (this.tpReplyAt || 0) > 2500) { this.tpReply = false; log("Işınlanma yanıtı beklemesi bırakıldı:", this.name); }
         if (alive && !this.tpReply && Array.isArray(o.pos) && o.pos.length === 3 && o.pos.every(Number.isFinite) && o.tp === this.tpSeq && Number.isFinite(yaw) && Number.isFinite(pitch)) {
           const check = this.checkMove(o.pos, !!o.sneak);
           if (check.ok) {
@@ -448,6 +450,11 @@ class Session {
             // Not a move a Minecraft client could make: it never reaches the server; the page is put back.
             this.tpSeq++;
             this.rejects = (this.rejects || 0) + 1;
+            // Rejected over and over (about two seconds): the page's picture of the blocks may be stale — send
+            // the area again, so it walks on the same ground as the server.
+            this.rejectRun = Date.now() - (this.lastReject || 0) < 400 ? (this.rejectRun || 0) + 1 : 1;
+            this.lastReject = Date.now();
+            if (this.rejectRun % 30 === 0) { this.regionAt = null; log("Art arda reddedilen hareket, bölge yeniden gönderildi:", this.name, check.why); }
             if (this.rejects === 1 || this.rejects % 50 === 0) log("Geçersiz hareket engellendi:", this.name, check.why, "(" + this.rejects + ")");
           }
         }
