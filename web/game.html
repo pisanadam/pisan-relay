@@ -316,6 +316,7 @@
   let ws = null, myName = null, myId = null, playing = false;
   function connect(then) {
     if (ws && ws.readyState === 1) { then(); return; }
+    if (ws && ws.readyState === 0) { ws.addEventListener("open", then, { once: true }); return; }
     ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
     ws.onopen = then;
     ws.onmessage = e => { try { onMessage(JSON.parse(e.data)); } catch (err) { console.error(err); } };
@@ -330,6 +331,8 @@
       : s === "strike" ? "Pisan Strike: CS2 tarzı silahlı maçlar. Sadece adınla girersin; adının başında (mobil) yazar."
       : "Pisan Lig: sadece adınla girersin; adının başında (mobil) yazar.";
     document.querySelectorAll(".ligOnly").forEach(e => e.style.display = s === "pvp" ? "none" : "");
+    // Wake the chosen server now: it starts while you type your name.
+    try { connect(() => send({ t: "warm", server: s })); } catch (e) { }
   }
   $("srvLig").onclick = () => pickServer(""); $("srvPvp").onclick = () => pickServer("pvp"); $("srvStrike").onclick = () => pickServer("strike");
   pickServer(server);

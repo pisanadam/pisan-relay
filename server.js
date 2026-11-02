@@ -35,6 +35,44 @@ const log = (...a) => console.log("[" + new Date().toTimeString().slice(0, 8) + 
 
 // ---------- HTTP: the game page, textures (bundled), skins (fetched from Mojang and kept) ----------
 const skins = new Map();
+/* exaroton: with the account's API key (EXAROTON_KEY or exaroton-key.txt next to this file, never in the
+   repository) the relay starts a sleeping server itself as soon as someone opens the page or picks it, and
+   joins the moment it is online instead of knocking every few seconds. */
+const EXAROTON_KEY = (process.env.EXAROTON_KEY || readFile("exaroton-key.txt") || "").trim();
+const exa = { ids: null, at: 0, started: new Map() };
+function exaApi(pathname) {
+  return new Promise(res => {
+    if (!EXAROTON_KEY) return res(null);
+    const r = https.get({ host: "api.exaroton.com", path: "/v1" + pathname, headers: { Authorization: "Bearer " + EXAROTON_KEY } }, rs => {
+      let d = ""; rs.on("data", c => d += c);
+      rs.on("end", () => { try { const o = JSON.parse(d); res(o && o.success ? o.data : null); } catch (e) { res(null); } });
+    });
+    r.on("error", () => res(null)); r.setTimeout(8000, () => { r.destroy(); res(null); });
+  });
+}
+async function exaServer(host) {
+  if (!EXAROTON_KEY) return null;
+  if (!exa.ids || Date.now() - exa.at > 10 * 60000) {
+    const list = await exaApi("/servers");
+    if (list) { exa.ids = new Map(list.map(sv => [String(sv.address).toLowerCase(), sv.id])); exa.at = Date.now(); }
+  }
+  return exa.ids && exa.ids.get(String(host).toLowerCase()) || null;
+}
+const EXA_STATUS = { 0: "kapalı", 1: "açık", 2: "başlıyor", 3: "kapanıyor", 4: "yeniden başlıyor", 5: "kaydediliyor", 6: "yükleniyor", 7: "çöktü", 8: "sırada", 10: "hazırlanıyor" };
+/* Status of the server at this address (null without a key), starting it when it sleeps. */
+async function exaWake(host) {
+  const id = await exaServer(host); if (!id) return null;
+  const sv = await exaApi("/servers/" + id); if (!sv) return null;
+  if ((sv.status === 0 || sv.status === 7) && Date.now() - (exa.started.get(id) || 0) > 20000) {
+    exa.started.set(id, Date.now());
+    await exaApi("/servers/" + id + "/start/");
+    log("exaroton: " + host + " başlatıldı");
+    return 6;
+  }
+  return sv.status;
+}
+function serverAddress(name) { const srv = String(name || "").trim().toLowerCase(); return (srv === "pvp" ? PVP_SERVER : srv === "strike" ? STRIKE_SERVER : HOME_SERVER).split(":")[0]; }
+
 function getJson(url) {
   return new Promise(res => https.get(url, r => { let d = ""; r.on("data", c => d += c); r.on("end", () => { try { res(r.statusCode === 200 ? JSON.parse(d) : null); } catch (e) { res(null); } }); }).on("error", () => res(null)));
 }
@@ -205,11 +243,19 @@ class Session {
     this.connect();
   }
 
-  connect() {
+  async connect() {
     if (this.closed) return;
     this.connecting = true;
     this.everSpawned = false; this.lastKick = "";
     this.send({ t: "waking", text: this.label + " sunucusuna bağlanılıyor…" });
+    // A sleeping exaroton server is started here and joined the moment it is up.
+    for (let i = 0; i < 150 && !this.closed; i++) {
+      let st = null; try { st = await exaWake(this.host); } catch (e) { }
+      if (st === null || st === 1) break;
+      this.send({ t: "waking", text: this.label + " " + (EXA_STATUS[st] || "hazırlanıyor") + "… (" + (i * 2) + " sn)" });
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    if (this.closed) return;
     const options = { host: this.host, port: this.port, username: this.name, hideErrors: true, checkTimeoutInterval: 60000, version: "1.20.1" };
     if (this.microsoft) {
       // Microsoft sign-in with a device code; the token lives only for this session.
@@ -355,7 +401,7 @@ class Session {
       // Not up yet: this join attempt has asked exaroton to start it (both servers start on join). Knock again shortly.
       this.wakeTries = (this.wakeTries || 0) + 1;
       this.send({ t: "waking", text: this.lastKick || "Sunucu başlatılıyor…" });
-      this.retry = setTimeout(() => this.connect(), 8000);
+      this.retry = setTimeout(() => this.connect(), EXAROTON_KEY ? 2000 : 8000);
     });
   }
 
@@ -368,6 +414,7 @@ class Session {
 
   onMessage(o) {
     if (o.t === "hello") return this.hello(o);
+    if (o.t === "warm") { exaWake(serverAddress(o.server)).catch(() => { }); return; }
     const bot = this.bot;
     if (!bot || !bot.entity) return;
     const adventure = bot.game && (bot.game.gameMode === "adventure" || bot.game.gameMode === "spectator");

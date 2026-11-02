@@ -19,6 +19,9 @@ if [ ! -s pisan-relay-key.txt ]; then
   exit 1
 fi
 chmod 600 pisan-relay-key.txt
+# Optional exaroton API key (EXAROTON_KEY=... before the command): the relay then starts sleeping servers itself
+# and joins them the moment they are up. Kept in exaroton-key.txt across updates.
+if [ -n "${EXAROTON_KEY:-}" ]; then printf '%s\n' "$EXAROTON_KEY" > exaroton-key.txt; chmod 600 exaroton-key.txt; fi
 
 # Optional default texture pack for every player: PACK_URL=<zip link> before the command downloads it once
 # (it stays as pack.zip in this folder across updates; delete pack.zip to go back to the bundled textures).
