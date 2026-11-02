@@ -530,6 +530,8 @@ class Session {
   tick() {
     const bot = this.bot;
     if (!bot || !bot.entity) return;
+    // The plugin's extras stopped coming (left the match, the server busy): do not keep an old pause or camera.
+    if (this.extrasAt && Date.now() - this.extrasAt > 1500 && (this.extras.b || this.extras.cam)) this.extras = {};
     const camera = this.extras.cam;
     const view = camera ? new Vec3(camera[0], camera[1], camera[2]) : bot.entity.position;
     // Watching (a goal replay's camera, spectator): the camera hangs above the pitch and looks across it, so the

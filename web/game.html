@@ -142,6 +142,7 @@
   <canvas id="cv"></canvas>
   <div id="cross"></div>
   <div id="boss"><div id="score"></div><div class="bar"><i></i></div></div>
+  <div id="pauseNote" style="position:absolute;left:50%;top:30%;transform:translateX(-50%);padding:4px 10px;background:rgba(0,0,0,.45);color:#ffd84a;font:16px monospace;display:none;pointer-events:none;z-index:5"></div>
   <div id="chat"></div>
   <div id="title"></div>
   <div id="subtitle"></div>
@@ -3082,6 +3083,9 @@
       const mine = st.latest.me;
       cam = st.latest.cam || null;
       frozen = st.latest.ph === "wait";
+      // Say why nobody can move (kick-off countdown, keeper vote, after a goal) instead of just standing still.
+      const pn = $("pauseNote"), pt = frozen ? "Oyun durdu · bekle" + (st.latest.pause ? " " + st.latest.pause + " sn" : "") : "";
+      if (pn.textContent !== pt) { pn.textContent = pt; pn.style.display = pt ? "block" : "none"; }
       spectating = !!cam;
       if (mine) {
         // Server teleports (kick-off, refused steps) and the first state put us where the server says.
